@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "orbita": {
+      "command": "C:\\FULL\\PATH\\TO\\.venv\\Scripts\\orbita-agent.exe",
+      "args": ["serve", "--transport", "stdio"],
+      "env": {
+        "ORBITA_AGENT_HOME": "C:\\Users\\YOUR_NAME\\OrbitaAgentData"
+      }
+    }
+  }
+}
