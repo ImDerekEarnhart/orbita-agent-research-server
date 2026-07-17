@@ -14,6 +14,8 @@ An AI may:
 - summarize survivors, refutations, limitations, and next tests;
 - search curated historical research and finite receipts;
 - export a concrete graph witness for independent Lean checking.
+- propose or replay an allowlisted research-policy improvement;
+- ask a human to approve one exact candidate/evaluation pair or an exact rollback.
 
 An AI must not:
 
@@ -25,6 +27,17 @@ An AI must not:
 - turn a finite survivor into a universal theorem;
 - erase weakened claims or inconvenient counterexamples;
 - bind the unauthenticated HTTP server to a public interface.
+- claim a replay-eligible policy is objectively better without external evaluation;
+- promote or roll back a policy without explicit authorization for that exact action;
+- use self-improvement to edit code, execute commands, deploy, or add capabilities.
+
+## Improvement operating contract
+
+Read `orbita_improvement_status` first. Use completed cases that are representative of the intended workload. Review
+the proposal patch, acceptance criteria, both metric sets, errors, invariants, and benchmark receipts. Treat
+`eligible_for_review` as permission to consider activation, never as automatic approval. Show the exact hashes and
+material metric changes to the user before invoking promotion. After activation, compile new plans normally; each
+plan freezes the active policy receipt. Use rollback if subsequent evidence shows a regression.
 
 ## Result language
 

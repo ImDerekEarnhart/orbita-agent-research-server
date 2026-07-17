@@ -20,6 +20,10 @@ class AgentConfig:
         return self.home / "orbita_agent.db"
 
     @property
+    def improvement_db(self) -> Path:
+        return self.home / "orbita_improvements.db"
+
+    @property
     def workspace(self) -> Path:
         return self.home / "workspace"
 

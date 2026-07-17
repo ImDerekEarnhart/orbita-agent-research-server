@@ -53,10 +53,22 @@ class ResearchMVP:
         record = self.ingestor.ingest(file_path, case_dir)
         return self.store.add_file_record(case_id, record)
 
-    def compile_case(self, case_id: str, *, max_candidates: int = 60) -> dict[str, Any]:
+    def compile_case(
+        self,
+        case_id: str,
+        *,
+        max_candidates: int = 60,
+        policy: dict[str, Any] | None = None,
+        policy_receipt: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         case = self.store.get_case(case_id)
-        plan = self.compiler.compile(case, max_candidates=max_candidates)
-        return self.store.save_plan(case_id, plan, compiler="orbita-heuristic-compiler/0.1")
+        plan = self.compiler.compile(
+            case,
+            max_candidates=max_candidates,
+            policy=policy,
+            policy_receipt=policy_receipt,
+        )
+        return self.store.save_plan(case_id, plan, compiler="orbita-heuristic-compiler/0.2-policy-governed")
 
     def submit_external_plan(self, case_id: str, plan: dict[str, Any], *, compiler: str = "external-ai") -> dict[str, Any]:
         case = self.store.get_case(case_id)

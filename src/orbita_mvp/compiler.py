@@ -11,7 +11,18 @@ from .table_domain import generate_table_candidates
 class ResearchCompiler:
     """Translate a case into an explicit, reviewable, frozen analysis plan."""
 
-    def compile(self, case: dict[str, Any], *, max_candidates: int = 60) -> dict[str, Any]:
+    def compile(
+        self,
+        case: dict[str, Any],
+        *,
+        max_candidates: int = 60,
+        policy: dict[str, Any] | None = None,
+        policy_receipt: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        policy = policy or {}
+        max_candidates = int(policy.get("max_candidates", max_candidates))
+        scout_fraction = float(policy.get("scout_fraction", 0.6))
+        seed = int(policy.get("seed", 20260623))
         files = case.get("files", [])
         tables = [f for f in files if f.get("artifact_kind") == "table" and f.get("extracted_path")]
         texts = [f for f in files if f.get("artifact_kind") == "text" and f.get("extracted_path")]
@@ -28,6 +39,7 @@ class ResearchCompiler:
                 "routes": [],
                 "candidates": [],
                 "assumptions": [],
+                "improvement_policy": policy_receipt,
             }
         selected = max(tables, key=lambda item: int(item.get("profile", {}).get("rows", 0)))
         df = pd.read_csv(Path(selected["extracted_path"]))
@@ -35,6 +47,8 @@ class ResearchCompiler:
             df,
             goal=case.get("goal", ""),
             max_candidates=max_candidates,
+            scout_fraction=scout_fraction,
+            seed=seed,
         )
         profile = selected.get("profile", {})
         assumptions = [
@@ -81,13 +95,14 @@ class ResearchCompiler:
             "candidate_generation": generation,
             "routes": ["uploaded_table_association", "data_quality_audit", "belief_graph_import"],
             "thresholds": {
-                "commit_at": 0.25,
-                "baseline_margin": 0.05,
-                "held_out_min": 0.15,
-                "cross_seed_count": 9,
-                "cross_seed_min": 0.15,
-                "cross_seed_max_spread": 0.65,
+                "commit_at": float(policy.get("commit_at", 0.25)),
+                "baseline_margin": float(policy.get("baseline_margin", 0.05)),
+                "held_out_min": float(policy.get("held_out_min", 0.15)),
+                "cross_seed_count": int(policy.get("cross_seed_count", 9)),
+                "cross_seed_min": float(policy.get("cross_seed_min", 0.15)),
+                "cross_seed_max_spread": policy.get("cross_seed_max_spread", 0.65),
             },
+            "improvement_policy": policy_receipt,
             "candidates": candidates,
             "assumptions": assumptions,
             "blocking_questions": [],

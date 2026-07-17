@@ -9,14 +9,15 @@ RUN python -m pip wheel --wheel-dir /wheels .
 FROM python:3.12-slim AS runtime
 
 LABEL org.opencontainers.image.title="Orbita Agent Research Server" \
-      org.opencontainers.image.version="0.1.1" \
-      org.opencontainers.image.description="Authenticated MCP research, falsification, and epistemic-memory server"
+      org.opencontainers.image.version="0.3.0" \
+      org.opencontainers.image.description="Authenticated MCP research with governed policy improvement"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     ORBITA_AGENT_HOME=/data \
-    ORBITA_AGENT_REQUIRE_AUTH=1
+    ORBITA_AGENT_REQUIRE_AUTH=1 \
+    ORBITA_AGENT_AUTH_MODE=oauth-github
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends gosu ca-certificates \
