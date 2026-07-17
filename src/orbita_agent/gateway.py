@@ -11,6 +11,7 @@ from orbita_mvp import ResearchMVP
 
 from .config import AgentConfig
 from .graph_adapter import analyze_graph, export_lean_certificate
+from .improvement import PROMOTION_PHRASE, ROLLBACK_PHRASE, ImprovementLab
 from .knowledge import KnowledgeStore
 
 APPROVAL_PHRASE = "I reviewed this exact frozen plan"
@@ -37,9 +38,11 @@ class AgentGateway:
         self.config = (config or AgentConfig.from_env()).ensure()
         self.service = ResearchMVP(self.config.db_path, self.config.workspace)
         self.knowledge = KnowledgeStore(self.config.knowledge_db)
+        self.improvements = ImprovementLab(self.config.improvement_db, self.service)
         self._lock = threading.RLock()
 
     def close(self) -> None:
+        self.improvements.close()
         self.knowledge.close()
         self.service.close()
 
@@ -52,7 +55,7 @@ class AgentGateway:
     def capabilities(self) -> dict[str, Any]:
         return {
             "product": "Orbita Agent Research Server",
-            "version": "0.1.1",
+            "version": "0.3.0",
             "core": {
                 "epistemic_runtime": "1.5-derived",
                 "discovery_engine": "0.2-compatible",
@@ -67,6 +70,12 @@ class AgentGateway:
                 "bounded graph analysis and Lean finite-certificate export",
             ],
             "approval_phrase": APPROVAL_PHRASE,
+            "self_improvement": {
+                "mode": "bounded_policy_improvement",
+                "promotion_phrase": PROMOTION_PHRASE,
+                "rollback_phrase": ROLLBACK_PHRASE,
+                "active_policy": self.improvements.active_policy(),
+            },
             "limits": {
                 "max_inline_bytes": self.config.max_inline_bytes,
                 "max_graph_vertices": self.config.max_graph_vertices,
@@ -78,6 +87,7 @@ class AgentGateway:
                 "Plan approval is a distinct hash-bound action.",
                 "Inline agent uploads are text-only; browser/REST intake supports richer files.",
                 "Lean export checks a concrete finite witness only.",
+                "Self-improvement changes allowlisted research-policy values only and never promotes itself.",
             ],
         }
 
@@ -173,11 +183,97 @@ class AgentGateway:
             ),
         }
 
-    def compile_plan(self, case_id: str, *, max_candidates: int = 60) -> dict[str, Any]:
-        if not 1 <= int(max_candidates) <= 200:
-            raise ValueError("max_candidates must be between 1 and 200")
+    def compile_plan(self, case_id: str, *, max_candidates: int | None = None) -> dict[str, Any]:
+        active = self.improvements.active_policy()
+        policy = dict(active["policy"])
+        override = max_candidates is not None
+        if override:
+            if not 1 <= int(max_candidates) <= 200:
+                raise ValueError("max_candidates must be between 1 and 200")
+            policy["max_candidates"] = int(max_candidates)
+        receipt = {
+            "policy_id": active["id"],
+            "policy_version": active["version"],
+            "policy_hash": active["policy_hash"],
+            "max_candidates_overridden": override,
+        }
         with self._lock:
-            return self.service.compile_case(case_id, max_candidates=int(max_candidates))
+            return self.service.compile_case(
+                case_id,
+                max_candidates=policy["max_candidates"],
+                policy=policy,
+                policy_receipt=receipt,
+            )
+
+    def improvement_status(self) -> dict[str, Any]:
+        with self._lock:
+            return self.improvements.status()
+
+    def improvement_history(self, *, limit: int = 25) -> dict[str, Any]:
+        with self._lock:
+            return self.improvements.history(limit=limit)
+
+    def get_improvement(self, candidate_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.improvements.get_candidate(candidate_id)
+
+    def suggest_improvement(self) -> dict[str, Any]:
+        with self._lock:
+            return self.improvements.suggest()
+
+    def propose_improvement(
+        self,
+        *,
+        name: str,
+        rationale: str,
+        patch: dict[str, Any],
+        acceptance_criteria: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.improvements.propose(
+                name=name,
+                rationale=rationale,
+                patch=patch,
+                acceptance_criteria=acceptance_criteria,
+            )
+
+    def evaluate_improvement(self, candidate_id: str, *, case_ids: list[str] | None = None) -> dict[str, Any]:
+        with self._lock:
+            return self.improvements.evaluate(candidate_id, case_ids=case_ids)
+
+    def promote_improvement(
+        self,
+        candidate_id: str,
+        *,
+        expected_candidate_hash: str,
+        expected_evaluation_hash: str,
+        reviewer: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.improvements.promote(
+                candidate_id,
+                expected_candidate_hash=expected_candidate_hash,
+                expected_evaluation_hash=expected_evaluation_hash,
+                reviewer=reviewer,
+                confirmation=confirmation,
+            )
+
+    def rollback_improvement(
+        self,
+        target_policy_id: str,
+        *,
+        expected_active_policy_hash: str,
+        reviewer: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.improvements.rollback(
+                target_policy_id,
+                expected_active_policy_hash=expected_active_policy_hash,
+                reviewer=reviewer,
+                confirmation=confirmation,
+            )
 
     def submit_plan(self, case_id: str, *, plan: dict[str, Any], compiler: str = "external-ai") -> dict[str, Any]:
         if not compiler.strip() or len(compiler) > 120:

@@ -1,12 +1,15 @@
-# Orbita Agent Research Server v0.1.1
+# Orbita Agent Research Server v0.3.0
 
 Orbita Agent Research Server is a local, MCP-native research system for people and AI agents. It turns supplied data into an explicit analysis plan, freezes that plan before confirmation scoring, runs bounded falsification checks, and stores both survivors and failures in persistent epistemic memory.
 
-It also exposes a curated read-only research vault, preserved Erdős–Gyárfás search receipts, bounded finite-graph analysis, and Lean source export for concrete certificates.
+It also exposes a curated read-only research vault, preserved Erdős–Gyárfás search receipts, bounded finite-graph
+analysis, Lean source export for concrete certificates, and a governed self-improvement lab for its declarative
+research policy.
 
 The product rule is simple:
 
-> The model may propose. The plan hash, falsifiers, evidence ledger, and approval boundary decide what may be run and what may be claimed.
+> The model may propose. Replay, exact hashes, falsifiers, evidence ledgers, and human approval decide what may run,
+> activate, and be claimed.
 
 ## What was combined
 
@@ -31,6 +34,8 @@ flowchart TD
     B --> C["Frozen research plan"]
     C --> D["Discovery + falsifiers"]
     D --> E["Claims + evidence memory"]
+    E --> H["Historical replay lab"]
+    H --> C
     B --> F["Curated research vault"]
     B --> G["Bounded graph + Lean adapter"]
 ```
@@ -89,14 +94,16 @@ orbita-agent serve --transport streamable-http --host 127.0.0.1 --port 8765
 
 The MCP endpoint is `http://127.0.0.1:8765/mcp`.
 
-Local operation remains unauthenticated when bound to `127.0.0.1`. Remote deployments must set
-`ORBITA_AGENT_REQUIRE_AUTH=1` and a randomly generated `ORBITA_AGENT_API_TOKEN` containing at least 32 characters.
-Authenticated clients send it as `Authorization: Bearer <token>`.
+Local operation remains unauthenticated when bound to `127.0.0.1`. The production image uses OAuth 2.1 with GitHub
+identity by default. ChatGPT dynamically registers a client, uses authorization code + PKCE, and is redirected to
+GitHub for operator sign-in. Orbita admits only usernames in `ORBITA_OAUTH_ALLOWED_GITHUB_USERS` and issues its own
+short-lived, revocable bearer tokens. Static bearer mode remains available for rollback and non-interactive clients.
 
 ## Deploy on Railway
 
 The repository includes a non-root Docker image, Railway config-as-code, an unauthenticated `/health` readiness
-route, and bearer protection on `/mcp`. Follow [the Railway deployment guide](docs/RAILWAY_DEPLOYMENT.md).
+route, OAuth discovery/registration/token/revocation routes, and protected `/mcp`. Follow
+[the Railway deployment guide](docs/RAILWAY_DEPLOYMENT.md).
 
 ## Recommended agent flow
 
@@ -111,6 +118,24 @@ route, and bearer protection on `/mcp`. Follow [the Railway deployment guide](do
 9. Read every survivor and refutation, then inspect claim history and the report.
 10. When evidence changes, record contradiction or supersession instead of erasing history.
 
+## Governed self-improvement
+
+Orbita can learn from completed cases without rewriting its own code. The improvement lab can change only a small
+allowlist of research-policy values: candidate budget, scout split, deterministic seed, judge thresholds, and
+cross-seed falsification settings.
+
+1. `orbita_suggest_improvement` summarizes completed runs and creates one conservative proposal, or an AI can call
+   `orbita_propose_improvement` with an explicit patch and acceptance criteria.
+2. `orbita_evaluate_improvement` deterministically replays the active and proposed policies against frozen case,
+   plan, and dataset-hash receipts.
+3. A passing replay is only `eligible_for_review`; it is not automatically “better.”
+4. `orbita_promote_improvement` requires the exact candidate hash, latest evaluation hash, reviewer identity, and
+   exact confirmation phrase.
+5. `orbita_rollback_improvement` can restore a previously active policy through another hash-bound approval.
+
+The lab cannot edit source, invoke a shell, deploy, or activate its own proposal. New plans record the active policy
+ID, version, hash, and whether the caller overrode the candidate budget.
+
 The exact approval phrase is reported by `orbita_capabilities`; clients should not guess it.
 
 ## Tool groups
@@ -119,6 +144,7 @@ The exact approval phrase is reported by `orbita_capabilities`; clients should n
 - Memory: case claims, claim history, dependency impact, contradictions, supersession, and re-examination.
 - Vault: full-text curated research search and structured claim cards.
 - Graph theory: preserved finite-run summaries, near misses, bounded graph analysis, and Lean witness export.
+- Improvement: history-derived proposals, deterministic benchmark replay, policy activation, and rollback.
 
 ## Scientific boundaries
 
@@ -128,5 +154,6 @@ The exact approval phrase is reported by `orbita_capabilities`; clients should n
 - Open discovery is scout/confirmation separated, but it still requires external replication.
 - “No witness found” under a bounded graph search can be inconclusive.
 - Lean export certifies one explicit finite graph/cycle only.
+- Replay eligibility measures configured stability criteria; it does not establish scientific superiority.
 
 See [AI operator guide](docs/AI_OPERATOR_GUIDE.md), [architecture](docs/ARCHITECTURE.md), [security](docs/SECURITY.md), [source provenance](docs/SOURCE_PROVENANCE.md), and [validation](VALIDATION.md).

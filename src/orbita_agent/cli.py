@@ -60,6 +60,7 @@ def _doctor(config: AgentConfig) -> int:
             "python": sys.version.split()[0],
             "home": str(config.home.resolve()),
             "knowledge": capabilities["knowledge"],
+            "active_research_policy": capabilities["self_improvement"]["active_policy"],
             "optional_tools": {
                 "graphviz_dot": shutil.which("dot"),
                 "lean_lake": shutil.which("lake"),
@@ -78,7 +79,7 @@ def _doctor(config: AgentConfig) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="orbita-agent",
-        description="Agent-safe governed research and evidence server",
+        description="Agent-safe governed research, evidence, and policy-improvement server",
     )
     parser.add_argument("--home", help="State directory (default: ORBITA_AGENT_HOME or ~/.orbita-agent)")
     subparsers = parser.add_subparsers(dest="command", required=True)

@@ -181,7 +181,7 @@ def build(args: argparse.Namespace) -> dict[str, object]:
 
     metadata = {
         "schema_version": "1",
-        "product_version": "0.1.1",
+        "product_version": "0.3.0",
         "curation_rule": "Curated documents and structured receipts only; raw conversation transcripts excluded.",
         "source_archives": "math_vault_v0.1.0; eg_research_db_2026-06-23; lemma_miner_v1; lean_checker",
     }

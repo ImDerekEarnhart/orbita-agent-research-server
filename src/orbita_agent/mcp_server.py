@@ -3,10 +3,11 @@ from __future__ import annotations
 import hmac
 import json
 import os
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from mcp.server.auth.provider import AccessToken
-from mcp.server.auth.settings import AuthSettings
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from starlette.requests import Request
@@ -14,6 +15,7 @@ from starlette.responses import JSONResponse
 
 from .config import AgentConfig
 from .gateway import AgentGateway
+from .oauth import ORBITA_SCOPE, GitHubOAuthProvider
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
@@ -39,27 +41,97 @@ class StaticBearerTokenVerifier:
         )
 
 
-def _remote_auth(host: str, port: int) -> tuple[AuthSettings | None, StaticBearerTokenVerifier | None]:
-    token = os.getenv("ORBITA_AGENT_API_TOKEN", "")
-    require_auth = os.getenv("ORBITA_AGENT_REQUIRE_AUTH", "").strip().lower() in {"1", "true", "yes", "on"}
-    if require_auth and not token:
-        raise RuntimeError("ORBITA_AGENT_REQUIRE_AUTH is enabled but ORBITA_AGENT_API_TOKEN is missing")
-    if not token:
-        return None, None
+@dataclass(frozen=True)
+class RemoteAuth:
+    settings: AuthSettings | None
+    token_verifier: StaticBearerTokenVerifier | None
+    oauth_provider: GitHubOAuthProvider | None
+    label: str
 
+
+def _public_url(host: str, port: int) -> str:
     railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
     public_url = os.getenv("ORBITA_AGENT_PUBLIC_URL", "").strip()
     if not public_url and railway_domain:
         public_url = f"https://{railway_domain}"
     if not public_url:
-        public_url = f"http://localhost:{port}"
-    public_url = public_url.rstrip("/")
+        public_url = f"http://localhost:{port}" if host in {"0.0.0.0", "::"} else f"http://{host}:{port}"
+    return public_url.rstrip("/")
+
+
+def _integer_env(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer") from exc
+
+
+def _remote_auth(config: AgentConfig, host: str, port: int) -> RemoteAuth:
+    token = os.getenv("ORBITA_AGENT_API_TOKEN", "")
+    require_auth = os.getenv("ORBITA_AGENT_REQUIRE_AUTH", "").strip().lower() in {"1", "true", "yes", "on"}
+    auth_mode = os.getenv("ORBITA_AGENT_AUTH_MODE", "").strip().lower()
+    if not auth_mode:
+        auth_mode = "oauth-github" if os.getenv("ORBITA_OAUTH_GITHUB_CLIENT_ID") else "bearer" if token else "none"
+    if auth_mode not in {"oauth-github", "bearer", "none"}:
+        raise RuntimeError("ORBITA_AGENT_AUTH_MODE must be oauth-github, bearer, or none")
+    if require_auth and auth_mode == "none":
+        raise RuntimeError("ORBITA_AGENT_REQUIRE_AUTH is enabled but ORBITA_AGENT_AUTH_MODE is none")
+
+    public_url = _public_url(host, port)
+    if auth_mode == "oauth-github":
+        github_client_id = os.getenv("ORBITA_OAUTH_GITHUB_CLIENT_ID", "").strip()
+        github_client_secret = os.getenv("ORBITA_OAUTH_GITHUB_CLIENT_SECRET", "").strip()
+        allowed_users = os.getenv("ORBITA_OAUTH_ALLOWED_GITHUB_USERS", "").split(",")
+        missing = [
+            name
+            for name, value in (
+                ("ORBITA_OAUTH_GITHUB_CLIENT_ID", github_client_id),
+                ("ORBITA_OAUTH_GITHUB_CLIENT_SECRET", github_client_secret),
+                ("ORBITA_OAUTH_ALLOWED_GITHUB_USERS", ",".join(allowed_users).strip(", ")),
+            )
+            if not value
+        ]
+        if missing:
+            raise RuntimeError(f"OAuth mode is enabled but these variables are missing: {', '.join(missing)}")
+        provider = GitHubOAuthProvider(
+            database_path=config.home / "orbita_oauth.db",
+            public_url=public_url,
+            github_client_id=github_client_id,
+            github_client_secret=github_client_secret,
+            allowed_github_users=allowed_users,
+            access_token_ttl=_integer_env("ORBITA_OAUTH_ACCESS_TOKEN_TTL", 3600),
+            refresh_token_ttl=_integer_env("ORBITA_OAUTH_REFRESH_TOKEN_TTL", 30 * 24 * 3600),
+        )
+        settings = AuthSettings(
+            issuer_url=public_url,
+            service_documentation_url=f"{public_url}/",
+            resource_server_url=f"{public_url}/mcp",
+            required_scopes=[ORBITA_SCOPE],
+            client_registration_options=ClientRegistrationOptions(
+                enabled=True,
+                valid_scopes=[ORBITA_SCOPE],
+                default_scopes=[ORBITA_SCOPE],
+            ),
+            revocation_options=RevocationOptions(enabled=True),
+        )
+        return RemoteAuth(settings=settings, token_verifier=None, oauth_provider=provider, label="oauth-github")
+
+    if auth_mode == "none":
+        return RemoteAuth(settings=None, token_verifier=None, oauth_provider=None, label="none")
+    if not token:
+        raise RuntimeError("Bearer mode is enabled but ORBITA_AGENT_API_TOKEN is missing")
     settings = AuthSettings(
         issuer_url=public_url,
         resource_server_url=f"{public_url}/mcp",
-        required_scopes=["orbita:use"],
+        required_scopes=[ORBITA_SCOPE],
     )
-    return settings, StaticBearerTokenVerifier(token)
+    return RemoteAuth(
+        settings=settings,
+        token_verifier=StaticBearerTokenVerifier(token),
+        oauth_provider=None,
+        label="bearer",
+    )
 
 
 def build_mcp_server(
@@ -70,7 +142,7 @@ def build_mcp_server(
     port: int = 8765,
 ) -> tuple[FastMCP, AgentGateway]:
     gateway = gateway or AgentGateway(config)
-    auth, token_verifier = _remote_auth(host, port)
+    remote_auth = _remote_auth(gateway.config, host, port)
     mcp = FastMCP(
         "Orbita Agent Research Server",
         instructions=(
@@ -83,9 +155,29 @@ def build_mcp_server(
         streamable_http_path="/mcp",
         json_response=True,
         stateless_http=True,
-        auth=auth,
-        token_verifier=token_verifier,
+        auth=remote_auth.settings,
+        token_verifier=remote_auth.token_verifier,
+        auth_server_provider=remote_auth.oauth_provider,
     )
+
+    if remote_auth.oauth_provider:
+
+        @mcp.custom_route("/oauth/github/callback", methods=["GET"], include_in_schema=False)
+        async def oauth_github_callback(request: Request):
+            return await remote_auth.oauth_provider.github_callback(request)
+
+    @mcp.custom_route("/", methods=["GET"], include_in_schema=False)
+    async def service_documentation(_request: Request) -> JSONResponse:
+        return JSONResponse(
+            {
+                "product": "Orbita Agent Research Server",
+                "version": "0.3.0",
+                "mcp": "/mcp",
+                "health": "/health",
+                "authentication": remote_auth.label,
+                "documentation": "https://github.com/DerekEarnhart/orbita-agent-research-server",
+            }
+        )
 
     @mcp.custom_route("/health", methods=["GET"], include_in_schema=False)
     async def health(_request: Request) -> JSONResponse:
@@ -93,8 +185,8 @@ def build_mcp_server(
             {
                 "status": "ok",
                 "product": "orbita-agent-research-server",
-                "version": "0.1.1",
-                "authentication": "bearer" if token_verifier else "local-only-unconfigured",
+                "version": "0.3.0",
+                "authentication": remote_auth.label,
             }
         )
 
@@ -124,9 +216,81 @@ def build_mcp_server(
         return gateway.case_context(case_id)
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
-    def orbita_compile_plan(case_id: str, max_candidates: int = 60) -> dict[str, Any]:
-        """Compile a deterministic frozen plan; this proposes but does not approve or run it."""
+    def orbita_compile_plan(case_id: str, max_candidates: int | None = None) -> dict[str, Any]:
+        """Compile with the active policy; optionally override only the bounded candidate budget."""
         return gateway.compile_plan(case_id, max_candidates=max_candidates)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_improvement_status() -> dict[str, Any]:
+        """Read the active research policy, exact approval phrases, and self-improvement safety boundary."""
+        return gateway.improvement_status()
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_improvement_history(limit: int = 25) -> dict[str, Any]:
+        """List versioned policies and recent proposals without mutating the active policy."""
+        return gateway.improvement_history(limit=limit)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_get_improvement(candidate_id: str) -> dict[str, Any]:
+        """Fetch an exact proposal, candidate hash, latest replay, and evaluation hash for review."""
+        return gateway.get_improvement(candidate_id)
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_suggest_improvement() -> dict[str, Any]:
+        """Learn from completed runs and create one conservative proposal; never evaluates or activates it."""
+        return gateway.suggest_improvement()
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_propose_improvement(
+        name: str,
+        rationale: str,
+        patch: dict[str, Any],
+        acceptance_criteria: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Propose allowlisted policy changes and explicit replay criteria; arbitrary code changes are rejected."""
+        return gateway.propose_improvement(
+            name=name,
+            rationale=rationale,
+            patch=patch,
+            acceptance_criteria=acceptance_criteria,
+        )
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_evaluate_improvement(candidate_id: str, case_ids: list[str] | None = None) -> dict[str, Any]:
+        """Replay active and proposed policies on exact completed-case benchmarks and store a hash-bound comparison."""
+        return gateway.evaluate_improvement(candidate_id, case_ids=case_ids)
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_promote_improvement(
+        candidate_id: str,
+        expected_candidate_hash: str,
+        expected_evaluation_hash: str,
+        reviewer: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        """Activate an eligible proposal only after exact candidate, evaluation, reviewer, and phrase confirmation."""
+        return gateway.promote_improvement(
+            candidate_id,
+            expected_candidate_hash=expected_candidate_hash,
+            expected_evaluation_hash=expected_evaluation_hash,
+            reviewer=reviewer,
+            confirmation=confirmation,
+        )
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_rollback_improvement(
+        target_policy_id: str,
+        expected_active_policy_hash: str,
+        reviewer: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        """Restore a previously active policy using an exact active-policy hash and rollback confirmation."""
+        return gateway.rollback_improvement(
+            target_policy_id,
+            expected_active_policy_hash=expected_active_policy_hash,
+            reviewer=reviewer,
+            confirmation=confirmation,
+        )
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_submit_plan(case_id: str, plan: dict[str, Any], compiler: str = "external-ai") -> dict[str, Any]:
@@ -252,6 +416,11 @@ def build_mcp_server(
         """Agent-readable complete claim history."""
         return json.dumps(gateway.claim_history(claim_id), indent=2, sort_keys=True)
 
+    @mcp.resource("orbita://improvements/status")
+    def improvement_resource() -> str:
+        """Agent-readable active policy and bounded improvement contract."""
+        return json.dumps(gateway.improvement_status(), indent=2, sort_keys=True)
+
     @mcp.prompt()
     def orbita_research_protocol(goal: str = "Open discovery") -> str:
         """Create a cautious operating prompt for an Orbita research session."""
@@ -266,6 +435,8 @@ Goal: {goal}
 5. After approval, run the plan and report survivors, refutations, failed checks, and limitations.
 6. Describe associations as non-causal unless the design warrants causality.
 7. Never call a finite survivor a universal proof or a novel discovery without external verification.
+8. Replay improvement proposals and show the result to the user.
+9. Never call promotion or rollback without explicit authorization.
 """
 
     return mcp, gateway
