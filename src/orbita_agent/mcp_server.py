@@ -155,7 +155,8 @@ def build_mcp_server(
         "Orbita Agent Research Server",
         instructions=(
             "Use Orbita to turn supplied research data into a frozen analysis plan, require explicit review, "
-            "run bounded falsification checks, and preserve both survivors and refutations. Never describe an "
+            "run bounded falsification checks, preserve both survivors and refutations, and test reusable methods in a " \
+            "tenant-scoped Discovery Genome. Never describe an "
             "Orbita survivor as universal proof, causality, or novelty without independent warrant."
         ),
         host=host,
@@ -179,7 +180,7 @@ def build_mcp_server(
         return JSONResponse(
             {
                 "product": "Orbita Agent Research Server",
-                "version": "0.3.0",
+                "version": "0.4.0",
                 "mcp": "/mcp",
                 "health": "/health",
                 "authentication": remote_auth.label,
@@ -193,7 +194,7 @@ def build_mcp_server(
             {
                 "status": "ok",
                 "product": "orbita-agent-research-server",
-                "version": "0.3.0",
+                "version": "0.4.0",
                 "authentication": remote_auth.label,
             }
         )
