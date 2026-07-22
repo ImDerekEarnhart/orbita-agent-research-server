@@ -13,6 +13,7 @@ from mcp.types import ToolAnnotations
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from . import __version__
 from .config import AgentConfig
 from .gateway import AgentGateway
 from .genome_client import (
@@ -196,7 +197,7 @@ def build_mcp_server(
         return JSONResponse(
             {
                 "product": "Orbita Agent Research Server",
-                "version": "0.4.0",
+                "version": __version__,
                 "mcp": "/mcp",
                 "health": "/health",
                 "authentication": remote_auth.label,
@@ -210,7 +211,7 @@ def build_mcp_server(
             {
                 "status": "ok",
                 "product": "orbita-agent-research-server",
-                "version": "0.4.0",
+                "version": __version__,
                 "authentication": remote_auth.label,
             }
         )

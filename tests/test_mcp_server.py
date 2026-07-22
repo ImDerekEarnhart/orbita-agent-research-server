@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from starlette.testclient import TestClient
 
+from orbita_agent import __version__
 from orbita_agent.mcp_server import StaticBearerTokenVerifier, _case_metadata, build_mcp_server
 
 
@@ -56,6 +57,11 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
     assert tools["orbita_genome_freeze_tournament"].annotations.destructiveHint is True
     assert tools["orbita_genome_record_result"].annotations.destructiveHint is True
     assert tools["orbita_approve_plan"].description
+
+
+def test_runtime_version_metadata_matches_package(gateway, monkeypatch):
+    monkeypatch.setattr(gateway.knowledge, "status", lambda: {})
+    assert gateway.capabilities()["version"] == __version__ == "0.4.0"
 
 
 def test_mcp_schemas_are_machine_usable(gateway):
