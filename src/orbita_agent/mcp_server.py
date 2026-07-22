@@ -29,6 +29,11 @@ LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempot
 STATE_CHANGE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
 
 
+def _case_metadata(context: dict[str, Any]) -> dict[str, Any]:
+    case = context.get("case")
+    return case if isinstance(case, dict) else {}
+
+
 class StaticBearerTokenVerifier:
     """Verify one deployment secret without logging or persisting it."""
 
@@ -248,12 +253,12 @@ def build_mcp_server(
         """Create one review-needed executable operator, optionally linked to an existing Orbita research case."""
         provenance = dict(evidence or {})
         if source_case_id:
-            context = gateway.case_context(source_case_id)
+            case = _case_metadata(gateway.case_context(source_case_id))
             provenance.update(
                 {
                     "source_case_id": source_case_id,
-                    "source_case_name": context.get("name"),
-                    "source_case_status": context.get("status"),
+                    "source_case_name": case.get("name"),
+                    "source_case_status": case.get("status"),
                     "provenance": "orbita_agent_case",
                 }
             )
@@ -366,9 +371,13 @@ def build_mcp_server(
         )
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
-    def orbita_genome_hash_result(result: dict[str, Any]) -> dict[str, Any]:
-        """Compute the canonical SHA-256 review hash for a proposed tournament result before confirmation."""
-        return {"result_hash": hash_json(result), "result": result}
+    def orbita_genome_hash_result(
+        verdict: Literal["survived", "refuted", "inconclusive"],
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Hash the exact proposed verdict and result payload together before confirmation."""
+        reviewed_outcome = {"verdict": verdict, "result": result}
+        return {"result_hash": hash_json(reviewed_outcome), **reviewed_outcome}
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_create_case(name: str, goal: str = "", domain_hint: str | None = None) -> dict[str, Any]:
