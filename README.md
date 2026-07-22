@@ -62,8 +62,14 @@ Configure this MCP service with the matching identity:
 | `ORBITA_DISCOVERY_GENOME_TIMEOUT` | Optional request timeout in seconds; default 20 |
 
 The bridge exposes operator creation, evidence, blind tournaments, and one-time result recording. Operator and
-tournament freezes require server-generated review hashes plus exact confirmation phrases. It cannot activate a
-research-policy improvement or select an arbitrary tenant.
+tournament freezes require server-generated review hashes plus exact confirmation phrases, and the Guided UI checks
+those hashes inside the same database transaction that freezes the reviewed object. Result receipts bind the target
+tournament ID, entry ID, verdict, and result payload.
+
+A configured Discovery Genome bridge is deliberately single-principal: OAuth mode must allow exactly one GitHub user,
+which maps to the one configured Guided UI username. Deploy a separate isolated MCP service per user until an explicit
+per-request OAuth-subject-to-tenant mapping is implemented. The bridge cannot activate a research-policy improvement
+or select an arbitrary tenant.
 
 ## Install
 
