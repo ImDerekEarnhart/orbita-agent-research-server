@@ -8,7 +8,14 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from starlette.testclient import TestClient
 
-from orbita_agent.mcp_server import StaticBearerTokenVerifier, build_mcp_server
+from orbita_agent import __version__
+from orbita_agent.mcp_server import StaticBearerTokenVerifier, _case_metadata, build_mcp_server
+
+
+def test_case_metadata_reads_the_nested_gateway_case_view():
+    context = {"case": {"name": "Ferrite study", "status": "active"}, "files": []}
+    assert _case_metadata(context) == {"name": "Ferrite study", "status": "active"}
+    assert _case_metadata({"case": None}) == {}
 
 
 def test_mcp_surface_has_governed_tool_annotations(gateway):
@@ -31,6 +38,13 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
         "orbita_evaluate_improvement",
         "orbita_promote_improvement",
         "orbita_rollback_improvement",
+        "orbita_genome_status",
+        "orbita_genome_list_operators",
+        "orbita_genome_create_operator",
+        "orbita_genome_freeze_operator",
+        "orbita_genome_create_tournament",
+        "orbita_genome_freeze_tournament",
+        "orbita_genome_record_result",
     }
     assert expected <= tools.keys()
     assert tools["orbita_capabilities"].annotations.readOnlyHint is True
@@ -38,7 +52,16 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
     assert tools["orbita_run_discovery"].annotations.destructiveHint is True
     assert tools["orbita_promote_improvement"].annotations.destructiveHint is True
     assert tools["orbita_rollback_improvement"].annotations.destructiveHint is True
+    assert tools["orbita_genome_status"].annotations.readOnlyHint is True
+    assert tools["orbita_genome_freeze_operator"].annotations.destructiveHint is True
+    assert tools["orbita_genome_freeze_tournament"].annotations.destructiveHint is True
+    assert tools["orbita_genome_record_result"].annotations.destructiveHint is True
     assert tools["orbita_approve_plan"].description
+
+
+def test_runtime_version_metadata_matches_package(gateway, monkeypatch):
+    monkeypatch.setattr(gateway.knowledge, "status", lambda: {})
+    assert gateway.capabilities()["version"] == __version__ == "0.4.0"
 
 
 def test_mcp_schemas_are_machine_usable(gateway):
@@ -48,6 +71,8 @@ def test_mcp_schemas_are_machine_usable(gateway):
     assert set(approval["required"]) == {"plan_id", "expected_plan_hash", "reviewer", "confirmation"}
     graph = tools["orbita_analyze_graph"].parameters
     assert graph["properties"]["edges"]["type"] == "array"
+    genome_hash = tools["orbita_genome_hash_result"].parameters
+    assert set(genome_hash["required"]) == {"tournament_id", "entry_id", "verdict", "result"}
 
 
 def test_static_bearer_token_verifier():
@@ -93,6 +118,20 @@ def test_github_oauth_mode_is_configured(gateway, monkeypatch):
     assert mcp._auth_server_provider is not None
     assert str(mcp.settings.auth.resource_server_url) == "https://orbita.example.test/mcp"
     assert any(route.path == "/oauth/github/callback" for route in mcp._custom_starlette_routes)
+
+
+def test_genome_bridge_rejects_multiple_oauth_principals(gateway, monkeypatch):
+    monkeypatch.setenv("ORBITA_AGENT_REQUIRE_AUTH", "1")
+    monkeypatch.setenv("ORBITA_AGENT_AUTH_MODE", "oauth-github")
+    monkeypatch.setenv("ORBITA_OAUTH_GITHUB_CLIENT_ID", "github-client")
+    monkeypatch.setenv("ORBITA_OAUTH_GITHUB_CLIENT_SECRET", "github-secret")
+    monkeypatch.setenv("ORBITA_OAUTH_ALLOWED_GITHUB_USERS", "DerekEarnhart,SecondUser")
+    monkeypatch.setenv("ORBITA_DISCOVERY_GENOME_URL", "https://guided.example")
+    monkeypatch.setenv("ORBITA_DISCOVERY_GENOME_SERVICE_TOKEN", "t" * 48)
+    monkeypatch.setenv("ORBITA_DISCOVERY_GENOME_USERNAME", "dkscr711")
+
+    with pytest.raises(RuntimeError, match="exactly one allowed GitHub OAuth user"):
+        build_mcp_server(gateway=gateway, host="0.0.0.0", port=8000)
 
 
 def test_github_oauth_discovery_registration_and_challenge(gateway, monkeypatch):

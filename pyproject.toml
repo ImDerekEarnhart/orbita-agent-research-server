@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbita-agent-research-server"
-version = "0.3.0"
-description = "MCP-native governed discovery with replay-evaluated, approval-gated policy improvement."
+version = "0.4.0"
+description = "MCP-native governed discovery with approval-gated policy improvement and a tenant-scoped Discovery Genome."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{name = "Derek Earnhart"}]

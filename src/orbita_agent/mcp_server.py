@@ -13,13 +13,27 @@ from mcp.types import ToolAnnotations
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from . import __version__
 from .config import AgentConfig
 from .gateway import AgentGateway
+from .genome_client import (
+    OPERATOR_FREEZE_PHRASE,
+    RESULT_RECORD_PHRASE,
+    TOURNAMENT_FREEZE_PHRASE,
+    DiscoveryGenomeClient,
+    hash_json,
+    tournament_result_receipt,
+)
 from .oauth import ORBITA_SCOPE, GitHubOAuthProvider
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
 STATE_CHANGE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
+
+
+def _case_metadata(context: dict[str, Any]) -> dict[str, Any]:
+    case = context.get("case")
+    return case if isinstance(case, dict) else {}
 
 
 class StaticBearerTokenVerifier:
@@ -142,12 +156,24 @@ def build_mcp_server(
     port: int = 8765,
 ) -> tuple[FastMCP, AgentGateway]:
     gateway = gateway or AgentGateway(config)
+    genome = DiscoveryGenomeClient()
     remote_auth = _remote_auth(gateway.config, host, port)
+    if not genome.config.missing() and remote_auth.label == "oauth-github":
+        oauth_users = {
+            value.strip().casefold()
+            for value in os.getenv("ORBITA_OAUTH_ALLOWED_GITHUB_USERS", "").split(",")
+            if value.strip()
+        }
+        if len(oauth_users) != 1:
+            raise RuntimeError(
+                "A configured Discovery Genome bridge requires exactly one allowed GitHub OAuth user"
+            )
     mcp = FastMCP(
         "Orbita Agent Research Server",
         instructions=(
             "Use Orbita to turn supplied research data into a frozen analysis plan, require explicit review, "
-            "run bounded falsification checks, and preserve both survivors and refutations. Never describe an "
+            "run bounded falsification checks, preserve both survivors and refutations, "
+            "and test reusable methods in a tenant-scoped Discovery Genome. Never describe an "
             "Orbita survivor as universal proof, causality, or novelty without independent warrant."
         ),
         host=host,
@@ -171,7 +197,7 @@ def build_mcp_server(
         return JSONResponse(
             {
                 "product": "Orbita Agent Research Server",
-                "version": "0.3.0",
+                "version": __version__,
                 "mcp": "/mcp",
                 "health": "/health",
                 "authentication": remote_auth.label,
@@ -185,7 +211,7 @@ def build_mcp_server(
             {
                 "status": "ok",
                 "product": "orbita-agent-research-server",
-                "version": "0.3.0",
+                "version": __version__,
                 "authentication": remote_auth.label,
             }
         )
@@ -199,6 +225,173 @@ def build_mcp_server(
     def orbita_list_cases() -> list[dict[str, Any]]:
         """List local research cases without returning large plans or findings."""
         return gateway.list_cases()
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_genome_status() -> dict[str, Any]:
+        """Check the tenant-scoped Discovery Genome bridge and report exact approval phrases."""
+        return {
+            **genome.status(),
+            "approval_phrases": {
+                "freeze_operator": OPERATOR_FREEZE_PHRASE,
+                "freeze_tournament": TOURNAMENT_FREEZE_PHRASE,
+                "record_result": RESULT_RECORD_PHRASE,
+            },
+            "safety": {
+                "tenant_selected_by": "deployment allowlist",
+                "database_exposed": False,
+                "automatic_policy_promotion": False,
+            },
+        }
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_genome_list_operators() -> dict[str, Any]:
+        """List versioned discovery operators, executable contracts, states, and server-generated review hashes."""
+        return genome.list_operators()
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_genome_seed_operators() -> dict[str, Any]:
+        """Idempotently seed the seven review-needed cross-domain operator families; nothing is frozen or proven."""
+        return genome.seed_operators()
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_genome_create_operator(
+        operator_key: str,
+        name: str,
+        contract: dict[str, Any],
+        description: str = "",
+        source_case_id: str | None = None,
+        evidence: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create one review-needed executable operator, optionally linked to an existing Orbita research case."""
+        provenance = dict(evidence or {})
+        if source_case_id:
+            case = _case_metadata(gateway.case_context(source_case_id))
+            provenance.update(
+                {
+                    "source_case_id": source_case_id,
+                    "source_case_name": case.get("name"),
+                    "source_case_status": case.get("status"),
+                    "provenance": "orbita_agent_case",
+                }
+            )
+        payload: dict[str, Any] = {
+            "operator_key": operator_key,
+            "name": name,
+            "description": description,
+            "status": "review_needed",
+            "contract": contract,
+            "evidence": provenance,
+        }
+        if source_case_id:
+            payload["source_operator_id"] = f"case:{source_case_id}"
+        return genome.create_operator(payload)
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_genome_freeze_operator(
+        operator_id: str,
+        expected_review_hash: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        """Freeze exactly one reviewed operator contract; requires its current review hash and exact confirmation."""
+        return genome.freeze_operator(
+            operator_id,
+            expected_review_hash=expected_review_hash,
+            confirmation=confirmation,
+        )
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_genome_add_evidence(
+        operator_id: str,
+        case_id: str,
+        domain: str,
+        outcome: Literal["supported", "refuted", "inconclusive", "artifact"],
+        independence_level: Literal["same_case", "same_family", "cross_domain", "external"],
+        evidence: dict[str, Any] | None = None,
+        receipt_hash: str | None = None,
+    ) -> dict[str, Any]:
+        """Attach one scoped case outcome to an operator without changing or erasing the underlying case."""
+        gateway.case_context(case_id)
+        return genome.add_operator_evidence(
+            operator_id,
+            {
+                "case_id": case_id,
+                "domain": domain,
+                "outcome": outcome,
+                "independence_level": independence_level,
+                "evidence": evidence or {},
+                "receipt_hash": receipt_hash,
+            },
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_genome_list_tournaments() -> dict[str, Any]:
+        """List blind operator tournaments and their evaluated-entry counts."""
+        return genome.list_tournaments()
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_genome_get_tournament(tournament_id: str) -> dict[str, Any]:
+        """Read a tournament, entries, predictions, and its server-generated prospective manifest review hash."""
+        return genome.get_tournament(tournament_id)
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_genome_create_tournament(name: str, target: dict[str, Any]) -> dict[str, Any]:
+        """Create a draft blind-discovery tournament around one declared unseen target."""
+        return genome.create_tournament({"name": name, "target": target})
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_genome_add_tournament_entry(
+        tournament_id: str,
+        operator_id: str,
+        prediction: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Add one frozen operator and its falsifiable vanish/recovery/refuter prediction to a draft tournament."""
+        return genome.add_tournament_entry(
+            tournament_id,
+            {"operator_id": operator_id, "prediction": prediction},
+        )
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_genome_freeze_tournament(
+        tournament_id: str,
+        expected_review_hash: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        """Freeze exactly the reviewed blind-tournament manifest; requires its current hash and exact confirmation."""
+        return genome.freeze_tournament(
+            tournament_id,
+            expected_review_hash=expected_review_hash,
+            confirmation=confirmation,
+        )
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_genome_record_result(
+        tournament_id: str,
+        entry_id: str,
+        verdict: Literal["survived", "refuted", "inconclusive"],
+        result: dict[str, Any],
+        expected_result_hash: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        """Record a result once; requires the exact result hash and explicit human confirmation."""
+        return genome.record_tournament_result(
+            tournament_id,
+            entry_id,
+            verdict=verdict,
+            result=result,
+            expected_result_hash=expected_result_hash,
+            confirmation=confirmation,
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_genome_hash_result(
+        tournament_id: str,
+        entry_id: str,
+        verdict: Literal["survived", "refuted", "inconclusive"],
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Hash the exact target entry, verdict, and result payload together before confirmation."""
+        reviewed_outcome = tournament_result_receipt(tournament_id, entry_id, verdict, result)
+        return {"result_hash": hash_json(reviewed_outcome), **reviewed_outcome}
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_create_case(name: str, goal: str = "", domain_hint: str | None = None) -> dict[str, Any]:

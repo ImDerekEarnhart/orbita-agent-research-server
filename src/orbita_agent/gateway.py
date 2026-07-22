@@ -9,6 +9,7 @@ from typing import Any
 
 from orbita_mvp import ResearchMVP
 
+from . import __version__
 from .config import AgentConfig
 from .graph_adapter import analyze_graph, export_lean_certificate
 from .improvement import PROMOTION_PHRASE, ROLLBACK_PHRASE, ImprovementLab
@@ -55,7 +56,7 @@ class AgentGateway:
     def capabilities(self) -> dict[str, Any]:
         return {
             "product": "Orbita Agent Research Server",
-            "version": "0.3.0",
+            "version": __version__,
             "core": {
                 "epistemic_runtime": "1.5-derived",
                 "discovery_engine": "0.2-compatible",
