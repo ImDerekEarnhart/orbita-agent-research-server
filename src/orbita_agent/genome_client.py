@@ -6,7 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 from typing import Any
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -96,7 +96,7 @@ class DiscoveryGenomeClient:
             except Exception:
                 detail = "request rejected"
             raise DiscoveryGenomeError(f"Discovery Genome service returned HTTP {exc.code}: {detail}") from exc
-        except URLError as exc:
+        except OSError as exc:
             raise DiscoveryGenomeError("Discovery Genome service is unavailable") from exc
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise DiscoveryGenomeError("Discovery Genome service returned an invalid response") from exc
@@ -188,7 +188,7 @@ class DiscoveryGenomeClient:
     ) -> dict[str, Any]:
         if confirmation != RESULT_RECORD_PHRASE:
             raise DiscoveryGenomeError(f"confirmation must exactly equal: {RESULT_RECORD_PHRASE}")
-        actual = hash_json(result)
+        actual = hash_json({"verdict": verdict, "result": result})
         if not hmac.compare_digest(actual, expected_result_hash):
             raise DiscoveryGenomeError("Tournament result hash mismatch")
         response = self._request(
