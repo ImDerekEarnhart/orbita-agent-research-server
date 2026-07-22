@@ -21,6 +21,7 @@ from .genome_client import (
     TOURNAMENT_FREEZE_PHRASE,
     DiscoveryGenomeClient,
     hash_json,
+    tournament_result_receipt,
 )
 from .oauth import ORBITA_SCOPE, GitHubOAuthProvider
 
@@ -156,6 +157,16 @@ def build_mcp_server(
     gateway = gateway or AgentGateway(config)
     genome = DiscoveryGenomeClient()
     remote_auth = _remote_auth(gateway.config, host, port)
+    if not genome.config.missing() and remote_auth.label == "oauth-github":
+        oauth_users = {
+            value.strip().casefold()
+            for value in os.getenv("ORBITA_OAUTH_ALLOWED_GITHUB_USERS", "").split(",")
+            if value.strip()
+        }
+        if len(oauth_users) != 1:
+            raise RuntimeError(
+                "A configured Discovery Genome bridge requires exactly one allowed GitHub OAuth user"
+            )
     mcp = FastMCP(
         "Orbita Agent Research Server",
         instructions=(
@@ -372,11 +383,13 @@ def build_mcp_server(
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_genome_hash_result(
+        tournament_id: str,
+        entry_id: str,
         verdict: Literal["survived", "refuted", "inconclusive"],
         result: dict[str, Any],
     ) -> dict[str, Any]:
-        """Hash the exact proposed verdict and result payload together before confirmation."""
-        reviewed_outcome = {"verdict": verdict, "result": result}
+        """Hash the exact target entry, verdict, and result payload together before confirmation."""
+        reviewed_outcome = tournament_result_receipt(tournament_id, entry_id, verdict, result)
         return {"result_hash": hash_json(reviewed_outcome), **reviewed_outcome}
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
