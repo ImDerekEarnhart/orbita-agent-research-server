@@ -171,8 +171,8 @@ def build_mcp_server(
         "Orbita Agent Research Server",
         instructions=(
             "Use Orbita to turn supplied research data into a frozen analysis plan, require explicit review, "
-            "run bounded falsification checks, preserve both survivors and refutations, and test reusable methods in a " \
-            "tenant-scoped Discovery Genome. Never describe an "
+            "run bounded falsification checks, preserve both survivors and refutations, "
+            "and test reusable methods in a tenant-scoped Discovery Genome. Never describe an "
             "Orbita survivor as universal proof, causality, or novelty without independent warrant."
         ),
         host=host,
