@@ -31,6 +31,13 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
         "orbita_evaluate_improvement",
         "orbita_promote_improvement",
         "orbita_rollback_improvement",
+        "orbita_genome_status",
+        "orbita_genome_list_operators",
+        "orbita_genome_create_operator",
+        "orbita_genome_freeze_operator",
+        "orbita_genome_create_tournament",
+        "orbita_genome_freeze_tournament",
+        "orbita_genome_record_result",
     }
     assert expected <= tools.keys()
     assert tools["orbita_capabilities"].annotations.readOnlyHint is True
@@ -38,6 +45,10 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
     assert tools["orbita_run_discovery"].annotations.destructiveHint is True
     assert tools["orbita_promote_improvement"].annotations.destructiveHint is True
     assert tools["orbita_rollback_improvement"].annotations.destructiveHint is True
+    assert tools["orbita_genome_status"].annotations.readOnlyHint is True
+    assert tools["orbita_genome_freeze_operator"].annotations.destructiveHint is True
+    assert tools["orbita_genome_freeze_tournament"].annotations.destructiveHint is True
+    assert tools["orbita_genome_record_result"].annotations.destructiveHint is True
     assert tools["orbita_approve_plan"].description
 
 
