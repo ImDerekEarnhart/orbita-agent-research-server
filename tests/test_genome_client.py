@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+import orbita_agent.genome_client as genome_client
 from orbita_agent.genome_client import (
     OPERATOR_FREEZE_PHRASE,
     RESULT_RECORD_PHRASE,
@@ -37,6 +38,24 @@ def test_status_reports_missing_configuration_without_network():
     status = client.status()
     assert status["configured"] is False
     assert "ORBITA_DISCOVERY_GENOME_URL" in status["missing"]
+
+
+def test_socket_timeout_is_redacted_as_unavailable(monkeypatch):
+    client = DiscoveryGenomeClient(
+        DiscoveryGenomeConfig(
+            base_url="https://guided.example",
+            service_token="t" * 48,
+            username="derek",
+        )
+    )
+
+    def timeout_urlopen(*_args, **_kwargs):
+        raise TimeoutError("private socket detail")
+
+    monkeypatch.setattr(genome_client, "urlopen", timeout_urlopen)
+    with pytest.raises(DiscoveryGenomeError, match="service is unavailable") as exc_info:
+        client.status()
+    assert "private socket detail" not in str(exc_info.value)
 
 
 def test_freeze_operator_is_bound_to_server_review_hash_and_phrase():
@@ -87,7 +106,7 @@ def test_freeze_tournament_is_bound_to_prospective_manifest_hash():
 
 def test_result_requires_exact_payload_hash_and_confirmation():
     result_payload = {"observed": "effect vanished", "n": 40}
-    result_hash = hash_json(result_payload)
+    result_hash = hash_json({"verdict": "survived", "result": result_payload})
     client = FakeGenomeClient(
         [{"entry": {"id": "entry-1", "verdict": "survived"}}]
     )
@@ -100,7 +119,26 @@ def test_result_requires_exact_payload_hash_and_confirmation():
         confirmation=RESULT_RECORD_PHRASE,
     )
     assert response["result_hash"] == result_hash
+    assert client.calls[0][2]["verdict"] == "survived"
     assert client.calls[0][2]["result"] == result_payload
+
+
+def test_result_hash_rejects_a_different_verdict_for_the_same_payload():
+    result_payload = {"observed": "effect vanished", "n": 40}
+    reviewed_hash = hash_json({"verdict": "survived", "result": result_payload})
+    client = FakeGenomeClient([])
+
+    with pytest.raises(DiscoveryGenomeError, match="result hash mismatch"):
+        client.record_tournament_result(
+            "tour-1",
+            "entry-1",
+            verdict="refuted",
+            result=result_payload,
+            expected_result_hash=reviewed_hash,
+            confirmation=RESULT_RECORD_PHRASE,
+        )
+
+    assert client.calls == []
 
 
 @pytest.mark.parametrize(
