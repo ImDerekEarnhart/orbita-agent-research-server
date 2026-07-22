@@ -8,7 +8,13 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from starlette.testclient import TestClient
 
-from orbita_agent.mcp_server import StaticBearerTokenVerifier, build_mcp_server
+from orbita_agent.mcp_server import StaticBearerTokenVerifier, _case_metadata, build_mcp_server
+
+
+def test_case_metadata_reads_the_nested_gateway_case_view():
+    context = {"case": {"name": "Ferrite study", "status": "active"}, "files": []}
+    assert _case_metadata(context) == {"name": "Ferrite study", "status": "active"}
+    assert _case_metadata({"case": None}) == {}
 
 
 def test_mcp_surface_has_governed_tool_annotations(gateway):
@@ -59,6 +65,8 @@ def test_mcp_schemas_are_machine_usable(gateway):
     assert set(approval["required"]) == {"plan_id", "expected_plan_hash", "reviewer", "confirmation"}
     graph = tools["orbita_analyze_graph"].parameters
     assert graph["properties"]["edges"]["type"] == "array"
+    genome_hash = tools["orbita_genome_hash_result"].parameters
+    assert set(genome_hash["required"]) == {"verdict", "result"}
 
 
 def test_static_bearer_token_verifier():
