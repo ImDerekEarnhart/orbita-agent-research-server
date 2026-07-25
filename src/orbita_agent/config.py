@@ -29,6 +29,7 @@ class AgentConfig:
     """Filesystem and resource limits for the local agent gateway."""
 
     home: Path
+    tenant: str | None = None
     knowledge_db: Path | None = None
     max_inline_bytes: int = 8_000_000
     max_graph_vertices: int = 128
@@ -74,7 +75,7 @@ class AgentConfig:
         The curated knowledge store is deliberately left shared — it is read-only
         reference data shipped with the server, not anything a caller wrote.
         """
-        return replace(self, home=self.home / TENANTS_DIRNAME / tenant_slug(tenant))
+        return replace(self, home=self.home / TENANTS_DIRNAME / tenant_slug(tenant), tenant=tenant)
 
     @classmethod
     def from_env(cls) -> AgentConfig:

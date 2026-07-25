@@ -167,6 +167,10 @@ def server(gateway, monkeypatch):
         json.dumps({DEREK: "dkscr711", STRANGER: "stranger-tenant"}),
     )
     monkeypatch.delenv("ORBITA_DISCOVERY_GENOME_URL", raising=False)
+    # Name the operator, as production does. Without this the archive policy fails
+    # closed and refuses every upload, which is correct but is not what is under test
+    # here — see test_archive_policy.py for that behaviour.
+    monkeypatch.setenv("ORBITA_OPERATOR_TENANT", "dkscr711")
     mcp, _ = build_mcp_server(gateway=gateway, host="0.0.0.0", port=8000)
 
     def act_as(subject: str):

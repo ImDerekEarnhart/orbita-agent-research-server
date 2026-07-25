@@ -31,6 +31,7 @@ from .genome_client import (
     hash_json,
     tournament_result_receipt,
 )
+from .archive_policy import ArchiveIngestionRefused, ArchivePolicy
 from .oauth import ORBITA_SCOPE, GitHubOAuthProvider
 from .tenancy import LegacySinglePrincipal, TenantResolutionError, build_registry
 from .uploads import UploadError, UploadTicketStore, max_upload_bytes
@@ -354,9 +355,10 @@ def build_mcp_server(
         # the caller's own active policy whenever the caller has a tenant, so no other
         # tenant's policy values are ever echoed back.
         try:
-            return _gateway_for_caller().capabilities()
+            described = _gateway_for_caller().capabilities()
         except TenantResolutionError:
-            return gateway.capabilities()
+            described = gateway.capabilities()
+        return described | {"archive_intake": ArchivePolicy.from_env().describe()}
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_list_cases() -> list[dict[str, Any]]:
@@ -650,7 +652,14 @@ def build_mcp_server(
         # Resolve the case first, so an unknown case or another tenant's case fails here,
         # before any capability exists to be leaked.
         caller.case_context(case_id)
-        tenant = _resolve_tenant() if remote_auth.label == "oauth-github" else "operator"
+        tenant = _resolve_tenant() if remote_auth.label == "oauth-github" else None
+        # Refuse before minting, so a tenant who may not store an archive never receives
+        # a URL that would accept one.
+        try:
+            ArchivePolicy.from_env().ensure(tenant)
+        except ArchiveIngestionRefused as exc:
+            raise ValueError(str(exc)) from exc
+        tenant = tenant or "operator"
         try:
             ticket, record = uploads.mint(
                 tenant=tenant,
