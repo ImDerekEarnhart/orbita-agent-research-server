@@ -47,6 +47,10 @@ class AgentConfig:
         return self.home / "workspace"
 
     @property
+    def memory_db(self) -> Path:
+        return self.home / "orbita_memory.db"
+
+    @property
     def inbox(self) -> Path:
         return self.home / "inbox"
 

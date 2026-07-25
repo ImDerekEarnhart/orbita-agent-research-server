@@ -7,6 +7,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 from orbita_mvp import ResearchMVP
 
 from . import __version__
@@ -14,6 +16,8 @@ from .config import AgentConfig
 from .graph_adapter import analyze_graph, export_lean_certificate
 from .improvement import PROMOTION_PHRASE, ROLLBACK_PHRASE, ImprovementLab
 from .knowledge import KnowledgeStore
+from .memory_index import MemoryIndex, chat_export_members
+from .reversals import find_candidate_reversals
 
 APPROVAL_PHRASE = "I reviewed this exact frozen plan"
 INLINE_SUFFIXES = {".csv", ".tsv", ".json", ".jsonl", ".txt", ".md", ".py", ".r", ".tex", ".ipynb"}
@@ -40,6 +44,7 @@ class AgentGateway:
         self.service = ResearchMVP(self.config.db_path, self.config.workspace)
         self.knowledge = KnowledgeStore(self.config.knowledge_db)
         self.improvements = ImprovementLab(self.config.improvement_db, self.service)
+        self.memory = MemoryIndex(self.config.memory_db)
         self._lock = threading.RLock()
         self._children: list[AgentGateway] = []
 
@@ -55,6 +60,7 @@ class AgentGateway:
             children, self._children = self._children, []
         for child in children:
             child.close()
+        self.memory.close()
         self.improvements.close()
         self.knowledge.close()
         self.service.close()
@@ -146,6 +152,7 @@ class AgentGateway:
                 record = self.service.add_file(case_id, path)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
+        memory = self._index_chat_exports(case_id, record)
         return {
             key: record.get(key)
             for key in (
@@ -160,7 +167,77 @@ class AgentGateway:
                 "profile",
                 "error",
             )
+        } | ({"memory": memory} if memory else {})
+
+    def _index_chat_exports(self, case_id: str, record: dict[str, Any]) -> dict[str, Any] | None:
+        """Index any chat export in a freshly ingested file so it becomes searchable.
+
+        Indexing failures never fail the upload: the file and its profile are already
+        durable, and a searchable copy is a convenience layered on top of them. The
+        error is reported so it is visible rather than silently swallowed.
+        """
+        indexed: list[dict[str, Any]] = []
+        for label, extracted in chat_export_members(record):
+            try:
+                frame = pd.read_csv(extracted)
+                indexed.append(
+                    self.memory.index_frame(
+                        case_id=case_id,
+                        file_id=f"{record['id']}::{label}",
+                        source_name=label,
+                        frame=frame,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - reported, never fatal to the upload
+                indexed.append({"source_name": label, "error": f"{type(exc).__name__}: {exc}"})
+        if not indexed:
+            return None
+        return {
+            "sources": indexed,
+            "messages_indexed": sum(entry.get("indexed", 0) for entry in indexed),
         }
+
+    def search_memory(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        case_id: str | None = None,
+        role: str | None = None,
+        conversation_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self.memory.search(
+            query, limit=limit, case_id=case_id, role=role, conversation_id=conversation_id
+        )
+
+    def memory_conversation(self, conversation_id: str, *, limit: int = 200) -> dict[str, Any]:
+        return self.memory.conversation(conversation_id, limit=limit)
+
+    def memory_status(self) -> dict[str, Any]:
+        return self.memory.stats()
+
+    def find_reversals(
+        self,
+        *,
+        case_id: str | None = None,
+        role: str = "user",
+        limit: int = 20,
+        min_days_apart: float = 1.0,
+    ) -> dict[str, Any]:
+        return find_candidate_reversals(
+            self.memory,
+            case_id=case_id,
+            role=role,
+            limit=limit,
+            min_days_apart=min_days_apart,
+        )
+
+    def forget_memory(self, *, case_id: str | None = None, everything: bool = False) -> dict[str, Any]:
+        if everything:
+            return {"scope": "everything", "messages_deleted": self.memory.delete_everything()}
+        if not case_id:
+            raise ValueError("pass a case_id, or everything=True to clear the whole index")
+        return {"scope": case_id, "messages_deleted": self.memory.delete_case(case_id)}
 
     def ingest_upload(self, *, case_id: str, path: Path) -> dict[str, Any]:
         """Ingest an already-staged file, bypassing the inline text-only size ceiling.
@@ -171,6 +248,7 @@ class AgentGateway:
         with self._lock:
             self.service.store.get_case(case_id)
             record = self.service.add_file(case_id, path)
+        memory = self._index_chat_exports(case_id, record)
         return {
             key: record.get(key)
             for key in (
@@ -185,7 +263,7 @@ class AgentGateway:
                 "profile",
                 "error",
             )
-        }
+        } | ({"memory": memory} if memory else {})
 
     def case_context(self, case_id: str) -> dict[str, Any]:
         with self._lock:

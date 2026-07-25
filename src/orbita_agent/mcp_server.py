@@ -574,6 +574,60 @@ def build_mcp_server(
         """Attach a UTF-8 text/table file. CSV, TSV, JSON(L), Markdown, text, code, and notebooks are allowed."""
         return _gateway_for_caller().add_inline_file(case_id=case_id, filename=filename, content=content)
 
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_search_memory(
+        query: str,
+        limit: int = 20,
+        case_id: str | None = None,
+        role: str | None = None,
+        conversation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Search your own ingested chat archives. Every hit carries the conversation, node, and date it came from.
+
+        This finds messages containing your terms. It does not summarize or interpret them,
+        and a message being present means it was written, not that it was or is true.
+        """
+        return _gateway_for_caller().search_memory(
+            query, limit=limit, case_id=case_id, role=role, conversation_id=conversation_id
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_memory_conversation(conversation_id: str, limit: int = 200) -> dict[str, Any]:
+        """Read one archived conversation in order, to see a search hit in its original context."""
+        return _gateway_for_caller().memory_conversation(conversation_id, limit=limit)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_memory_status() -> dict[str, Any]:
+        """Report how much archive memory is indexed, over what date range, and from which roles."""
+        return _gateway_for_caller().memory_status()
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_find_reversals(
+        case_id: str | None = None,
+        role: str = "user",
+        limit: int = 20,
+        min_days_apart: float = 1.0,
+    ) -> dict[str, Any]:
+        """Surface places in your archive where you appear to have changed your mind, for you to judge.
+
+        Pairs a later message in which you marked a change of position with an earlier
+        message on the same subject. These are candidates, not contradictions: Orbita
+        matched a self-correction marker and shared words, it did not read either
+        statement. Nothing is written to the belief graph.
+        """
+        return _gateway_for_caller().find_reversals(
+            case_id=case_id, role=role, limit=limit, min_days_apart=min_days_apart
+        )
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_forget_memory(case_id: str | None = None, everything: bool = False) -> dict[str, Any]:
+        """Permanently delete indexed archive memory for one case, or all of it.
+
+        This removes the searchable index only. The uploaded file itself stays in the case
+        until the case is deleted, so this is not by itself a complete erasure.
+        """
+        return _gateway_for_caller().forget_memory(case_id=case_id, everything=everything)
+
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_request_upload(case_id: str, filename: str, size_bytes: int) -> dict[str, Any]:
         """Mint a single-use URL for uploading one large file, such as a chat-history archive.
