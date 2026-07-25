@@ -384,8 +384,13 @@ class TenantRegistry:
 
         legacy = self.legacy
         if legacy is not None:
+            # Legacy mode allows exactly one GitHub login to sign in at all, so any
+            # subject holding a valid token must be that user. The observed login is
+            # checked when it is known, but its absence cannot block resolution: a
+            # deployment upgraded while a refresh token is live never re-enters the
+            # GitHub callback, so the identity may legitimately not have been observed.
             login = self.subject_login(subject)
-            if login and login.casefold() == legacy.github_login.casefold():
+            if login is None or login.casefold() == legacy.github_login.casefold():
                 self.bind(
                     subject,
                     legacy.genome_username,

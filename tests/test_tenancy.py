@@ -196,3 +196,22 @@ def test_an_unbound_client_cannot_reach_the_genome_service(monkeypatch):
 def test_deployment_configuration_no_longer_requires_a_tenant_username():
     config = DiscoveryGenomeConfig(base_url="https://guided.example", service_token="t" * 48)
     assert config.missing() == []
+
+
+def test_legacy_mode_resolves_an_unobserved_subject_after_an_upgrade(tmp_path):
+    """A live refresh token never re-enters the GitHub callback, so no login is observed.
+
+    Legacy mode admits exactly one GitHub login, so a valid subject must be that user.
+    """
+    registry = TenantRegistry(
+        tmp_path / "tenants.db",
+        legacy=LegacySinglePrincipal(github_login="DerekEarnhart", genome_username="dkscr711"),
+    )
+    assert registry.list_identities() == []
+    assert registry.resolve("github:1234") == "dkscr711"
+
+
+def test_non_legacy_mode_still_refuses_an_unobserved_subject(registry):
+    assert registry.legacy is None
+    with pytest.raises(TenantResolutionError, match="no Discovery Genome tenant is bound"):
+        registry.resolve("github:1234")
