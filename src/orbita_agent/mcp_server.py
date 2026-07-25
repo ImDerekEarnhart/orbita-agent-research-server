@@ -620,6 +620,16 @@ def build_mcp_server(
         )
 
     @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_delete_case(case_id: str, confirmation: str) -> dict[str, Any]:
+        """Permanently delete a case, its uploaded files, and its indexed memory. Irreversible.
+
+        Requires the exact phrase reported by orbita_capabilities. Returns a manifest of
+        what was removed and confirms the bytes are gone from the volume. Claims derived
+        from the case remain in the hash-chained ledger and are reported, not deleted.
+        """
+        return _gateway_for_caller().delete_case(case_id, confirmation=confirmation)
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
     def orbita_forget_memory(case_id: str | None = None, everything: bool = False) -> dict[str, Any]:
         """Permanently delete indexed archive memory for one case, or all of it.
 

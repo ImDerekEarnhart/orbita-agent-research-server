@@ -20,6 +20,7 @@ from .memory_index import MemoryIndex, chat_export_members
 from .reversals import find_candidate_reversals
 
 APPROVAL_PHRASE = "I reviewed this exact frozen plan"
+DELETION_PHRASE = "I permanently delete this case and its files"
 INLINE_SUFFIXES = {".csv", ".tsv", ".json", ".jsonl", ".txt", ".md", ".py", ".r", ".tex", ".ipynb"}
 
 
@@ -89,6 +90,7 @@ class AgentGateway:
                 "bounded graph analysis and Lean finite-certificate export",
             ],
             "approval_phrase": APPROVAL_PHRASE,
+            "deletion_phrase": DELETION_PHRASE,
             "self_improvement": {
                 "mode": "bounded_policy_improvement",
                 "promotion_phrase": PROMOTION_PHRASE,
@@ -264,6 +266,104 @@ class AgentGateway:
                 "error",
             )
         } | ({"memory": memory} if memory else {})
+
+    def delete_case(self, case_id: str, *, confirmation: str) -> dict[str, Any]:
+        """Permanently remove a case, its uploaded bytes, and its indexed memory.
+
+        This exists because "I deleted it" has to mean the bytes are gone. Clearing a
+        search index while the archive still sits on the volume would be a false
+        statement to someone who uploaded their whole chat history.
+
+        What it does not do is truncate the claim ledger. Claims are hash-chained
+        evidence records that other cases can reference, and quietly deleting them
+        under a data-erasure request would corrupt exactly the provenance this system
+        exists to keep. Any linked claims are reported and left in place; retracting a
+        finding is a separate deliberate act through supersession.
+        """
+        if confirmation != DELETION_PHRASE:
+            raise ValueError(f'deletion requires the exact phrase: "{DELETION_PHRASE}"')
+
+        with self._lock:
+            case = self.service.store.get_case(case_id)
+
+            files = [
+                {
+                    "id": item["id"],
+                    "original_name": item["original_name"],
+                    "size_bytes": item.get("size_bytes"),
+                    "sha256": item.get("sha256"),
+                }
+                for item in case.get("files", [])
+            ]
+            linked_claims = [
+                row["claim_id"]
+                for row in self.service.store.ledger.db.conn.execute(
+                    "SELECT claim_id FROM case_claims WHERE case_id = ?", (case_id,)
+                ).fetchall()
+            ]
+
+            memory_deleted = self.memory.delete_case(case_id)
+
+            connection = self.service.store.ledger.db.conn
+            with connection:
+                # Child rows first: the schema declares real foreign keys.
+                for table in (
+                    "case_reports",
+                    "case_claims",
+                    "case_runs",
+                    "analysis_plans",
+                    "case_files",
+                ):
+                    connection.execute(f"DELETE FROM {table} WHERE case_id = ?", (case_id,))
+                connection.execute("DELETE FROM research_cases WHERE id = ?", (case_id,))
+
+            # Only then the bytes, and only inside our own workspace. A stored path is
+            # data, and data is never a licence to remove an arbitrary directory.
+            workspace_root = self.config.workspace.resolve()
+            case_directory = (workspace_root / "cases" / case_id).resolve()
+            removed_bytes = 0
+            removed_files = 0
+            if workspace_root in case_directory.parents and case_directory.is_dir():
+                for path in case_directory.rglob("*"):
+                    if path.is_file():
+                        removed_bytes += path.stat().st_size
+                        removed_files += 1
+                shutil.rmtree(case_directory, ignore_errors=False)
+
+            still_present = case_directory.exists()
+            remaining_rows = connection.execute(
+                "SELECT COUNT(*) FROM research_cases WHERE id = ?", (case_id,)
+            ).fetchone()[0]
+
+        if still_present or remaining_rows:
+            raise RuntimeError(
+                f"deletion did not complete: directory_present={still_present}, "
+                f"rows_remaining={remaining_rows}"
+            )
+
+        return {
+            "deleted": True,
+            "case_id": case_id,
+            "case_name": case.get("name"),
+            "files_removed": removed_files,
+            "bytes_removed": removed_bytes,
+            "file_manifest": files,
+            "memory_messages_removed": memory_deleted,
+            "directory_removed": str(case_directory),
+            "verified_absent": not still_present and remaining_rows == 0,
+            "claims_left_in_ledger": linked_claims,
+            "boundary": (
+                "The uploaded files, their extracted copies, the case record, and the "
+                "searchable memory are gone from this tenant. "
+                + (
+                    f"{len(linked_claims)} claim(s) derived from this case remain in the "
+                    "hash-chained ledger and were not deleted; retract a finding through "
+                    "supersession rather than by erasing its record."
+                    if linked_claims
+                    else "No claims were derived from this case, so nothing remains in the ledger."
+                )
+            ),
+        }
 
     def case_context(self, case_id: str) -> dict[str, Any]:
         with self._lock:
