@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import os
+import shutil
 import threading
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -30,6 +33,7 @@ from .genome_client import (
 )
 from .oauth import ORBITA_SCOPE, GitHubOAuthProvider
 from .tenancy import LegacySinglePrincipal, TenantResolutionError, build_registry
+from .uploads import UploadError, UploadTicketStore, max_upload_bytes
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
@@ -210,6 +214,15 @@ def build_mcp_server(
 
     tenant_gateways: dict[str, AgentGateway] = {}
     gateway_guard = threading.Lock()
+    uploads = UploadTicketStore(gateway.config.home / "orbita_uploads.db")
+
+    def _gateway_for_tenant(tenant: str) -> AgentGateway:
+        with gateway_guard:
+            existing = tenant_gateways.get(tenant)
+            if existing is None:
+                existing = gateway.for_tenant(tenant)
+                tenant_gateways[tenant] = existing
+            return existing
 
     def _gateway_for_caller() -> AgentGateway:
         """Return the calling tenant's own research workspace, or refuse.
@@ -221,13 +234,7 @@ def build_mcp_server(
         """
         if remote_auth.label != "oauth-github":
             return gateway
-        tenant = _resolve_tenant()
-        with gateway_guard:
-            existing = tenant_gateways.get(tenant)
-            if existing is None:
-                existing = gateway.for_tenant(tenant)
-                tenant_gateways[tenant] = existing
-            return existing
+        return _gateway_for_tenant(_resolve_tenant())
 
     mcp = FastMCP(
         "Orbita Agent Research Server",
@@ -263,6 +270,68 @@ def build_mcp_server(
                 "health": "/health",
                 "authentication": remote_auth.label,
                 "documentation": "https://github.com/DerekEarnhart/orbita-agent-research-server",
+            }
+        )
+
+    @mcp.custom_route("/uploads/{ticket}", methods=["POST", "PUT"], include_in_schema=False)
+    async def receive_upload(request: Request) -> JSONResponse:
+        """Accept the bytes for one minted ticket.
+
+        This route carries no session of its own. The authenticated MCP call already
+        decided the tenant, the case, the filename, and the ceiling; the ticket is the
+        capability that carries that decision here, and it works exactly once.
+        """
+        try:
+            claim = uploads.claim(request.path_params["ticket"])
+        except UploadError as exc:
+            # Unknown, spent, and expired tickets are one response, so probing cannot
+            # distinguish "never existed" from "already used".
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=403)
+
+        tenant_gateway = _gateway_for_tenant(claim.tenant)
+        staging = tenant_gateway.config.inbox / f"upload_{uuid.uuid4().hex}"
+        staging.mkdir(parents=True, exist_ok=True)
+        target = staging / claim.filename
+
+        written = 0
+        digest = hashlib.sha256()
+        try:
+            with target.open("wb") as handle:
+                async for chunk in request.stream():
+                    if not chunk:
+                        continue
+                    written += len(chunk)
+                    # Enforced while streaming, not after. A ticket for 10 MB must not
+                    # let 10 GB reach the volume before anyone checks.
+                    if written > claim.max_bytes:
+                        raise UploadError(
+                            f"upload exceeded the {claim.max_bytes} byte ceiling for this ticket"
+                        )
+                    digest.update(chunk)
+                    handle.write(chunk)
+            if written == 0:
+                raise UploadError("upload was empty")
+            record = tenant_gateway.ingest_upload(case_id=claim.case_id, path=target)
+        except UploadError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=413)
+        except KeyError:
+            return JSONResponse({"ok": False, "error": "unknown case"}, status_code=404)
+        except Exception as exc:  # noqa: BLE001 - the client gets a type, never a traceback
+            return JSONResponse(
+                {"ok": False, "error": f"{type(exc).__name__} while ingesting the upload"},
+                status_code=500,
+            )
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "case_id": claim.case_id,
+                "filename": claim.filename,
+                "bytes_received": written,
+                "sha256": digest.hexdigest(),
+                "file": record,
             }
         )
 
@@ -504,6 +573,41 @@ def build_mcp_server(
     def orbita_add_inline_file(case_id: str, filename: str, content: str) -> dict[str, Any]:
         """Attach a UTF-8 text/table file. CSV, TSV, JSON(L), Markdown, text, code, and notebooks are allowed."""
         return _gateway_for_caller().add_inline_file(case_id=case_id, filename=filename, content=content)
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_request_upload(case_id: str, filename: str, size_bytes: int) -> dict[str, Any]:
+        """Mint a single-use URL for uploading one large file, such as a chat-history archive.
+
+        Inline uploads are text-only and capped well below archive size. This returns a URL
+        that accepts the raw bytes once, for this case and filename only, and then expires.
+        Upload with: curl --request POST --data-binary @<file> "<upload_url>"
+        """
+        caller = _gateway_for_caller()
+        # Resolve the case first, so an unknown case or another tenant's case fails here,
+        # before any capability exists to be leaked.
+        caller.case_context(case_id)
+        tenant = _resolve_tenant() if remote_auth.label == "oauth-github" else "operator"
+        try:
+            ticket, record = uploads.mint(
+                tenant=tenant,
+                case_id=case_id,
+                filename=filename,
+                declared_bytes=size_bytes,
+                max_bytes=max_upload_bytes(),
+                volume_path=gateway.config.home,
+            )
+        except UploadError as exc:
+            raise ValueError(str(exc)) from exc
+        return {
+            **record.public(),
+            "upload_url": f"{_public_url(host, port)}/uploads/{ticket}",
+            "method": "POST",
+            "single_use": True,
+            "note": (
+                "This URL is the authorization. Anyone holding it can write this one file to "
+                "this one case until it is used or expires. Do not share it or paste it into logs."
+            ),
+        }
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_case_context(case_id: str) -> dict[str, Any]:
