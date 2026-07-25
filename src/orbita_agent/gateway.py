@@ -17,6 +17,7 @@ from .graph_adapter import analyze_graph, export_lean_certificate
 from .improvement import PROMOTION_PHRASE, ROLLBACK_PHRASE, ImprovementLab
 from .knowledge import KnowledgeStore
 from .memory_index import MemoryIndex, chat_export_members
+from .reversals import find_candidate_reversals
 
 APPROVAL_PHRASE = "I reviewed this exact frozen plan"
 INLINE_SUFFIXES = {".csv", ".tsv", ".json", ".jsonl", ".txt", ".md", ".py", ".r", ".tex", ".ipynb"}
@@ -214,6 +215,22 @@ class AgentGateway:
 
     def memory_status(self) -> dict[str, Any]:
         return self.memory.stats()
+
+    def find_reversals(
+        self,
+        *,
+        case_id: str | None = None,
+        role: str = "user",
+        limit: int = 20,
+        min_days_apart: float = 1.0,
+    ) -> dict[str, Any]:
+        return find_candidate_reversals(
+            self.memory,
+            case_id=case_id,
+            role=role,
+            limit=limit,
+            min_days_apart=min_days_apart,
+        )
 
     def forget_memory(self, *, case_id: str | None = None, everything: bool = False) -> dict[str, Any]:
         if everything:

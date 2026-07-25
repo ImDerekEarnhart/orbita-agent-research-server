@@ -601,6 +601,24 @@ def build_mcp_server(
         """Report how much archive memory is indexed, over what date range, and from which roles."""
         return _gateway_for_caller().memory_status()
 
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_find_reversals(
+        case_id: str | None = None,
+        role: str = "user",
+        limit: int = 20,
+        min_days_apart: float = 1.0,
+    ) -> dict[str, Any]:
+        """Surface places in your archive where you appear to have changed your mind, for you to judge.
+
+        Pairs a later message in which you marked a change of position with an earlier
+        message on the same subject. These are candidates, not contradictions: Orbita
+        matched a self-correction marker and shared words, it did not read either
+        statement. Nothing is written to the belief graph.
+        """
+        return _gateway_for_caller().find_reversals(
+            case_id=case_id, role=role, limit=limit, min_days_apart=min_days_apart
+        )
+
     @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
     def orbita_forget_memory(case_id: str | None = None, everything: bool = False) -> dict[str, Any]:
         """Permanently delete indexed archive memory for one case, or all of it.
