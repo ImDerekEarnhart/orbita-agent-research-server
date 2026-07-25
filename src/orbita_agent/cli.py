@@ -10,6 +10,7 @@ from typing import Any
 
 from .config import AgentConfig
 from .gateway import APPROVAL_PHRASE, AgentGateway
+from .workspace_migration import apply_migration, plan_migration
 from .mcp_server import build_mcp_server
 from .tenancy import TenantResolutionError, build_registry
 
@@ -104,6 +105,27 @@ def _tenants(config: AgentConfig, args: argparse.Namespace) -> int:
         removed = registry.unbind(args.subject)
         _print({"subject": args.subject, "unbound": removed})
         return 0 if removed else 1
+    if action == "migrate-workspace":
+        plan = plan_migration(config, args.username)
+        if plan.blocked:
+            _print({"ok": False, "error": plan.blocked, "plan": plan.describe()})
+            return 1
+        if not args.apply:
+            _print(
+                {
+                    "ok": True,
+                    "dry_run": True,
+                    "plan": plan.describe(),
+                    "note": "nothing was copied; re-run with --apply to perform the migration",
+                }
+            )
+            return 0
+        try:
+            _print({"ok": True, "dry_run": False, "result": apply_migration(plan)})
+        except RuntimeError as exc:
+            _print({"ok": False, "error": str(exc), "plan": plan.describe()})
+            return 1
+        return 0
 
     subject = args.subject
     if not subject and args.login:
@@ -184,6 +206,17 @@ def main() -> None:
 
     tenant_unbind = tenant_commands.add_parser("unbind", help="Remove a binding")
     tenant_unbind.add_argument("--subject", required=True)
+
+    tenant_migrate = tenant_commands.add_parser(
+        "migrate-workspace",
+        help="Copy the pre-tenancy research workspace into one tenant's directory",
+    )
+    tenant_migrate.add_argument("--username", required=True, help="Genome username to adopt into")
+    tenant_migrate.add_argument(
+        "--apply",
+        action="store_true",
+        help="Perform the copy. Without this the command only reports what it would do.",
+    )
 
     args = parser.parse_args()
     config = _config(args.home)

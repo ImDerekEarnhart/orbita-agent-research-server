@@ -9,7 +9,7 @@ from typing import Any, Iterable
 import numpy as np
 import pandas as pd
 
-from orbita_discovery.core import Candidate
+from orbita_discovery.core import Candidate, CandidateNotScorable
 
 
 def _slug(text: str) -> str:
@@ -220,7 +220,9 @@ class UploadedTableDomain:
             x_name, y_name = c.payload["predictor"], c.payload["outcome"]
             pair = train[[x_name, y_name]].apply(pd.to_numeric, errors="coerce").dropna()
             if len(pair) < 3:
-                return {"kind": kind, "valid": False}
+                raise CandidateNotScorable(
+                    f"fewer than 3 usable numeric rows for {x_name!r} against {y_name!r}"
+                )
             x = pair[x_name].to_numpy(float)
             y = pair[y_name].to_numpy(float)
             X = np.column_stack([np.ones(len(x)), x])
@@ -231,17 +233,24 @@ class UploadedTableDomain:
             temp = pd.DataFrame({"g": train[group].astype(str), "y": pd.to_numeric(train[outcome], errors="coerce")}).dropna()
             means = {str(label): float(part["y"].mean()) for label, part in temp.groupby("g")}
             return {"kind": kind, "valid": bool(means), "means": means, "overall": float(temp["y"].mean()) if len(temp) else 0.0}
-        return {"kind": kind, "valid": False}
+        raise CandidateNotScorable(
+            f"this table domain cannot fit a candidate of kind {kind!r}; "
+            "it evaluates linear_association and group_difference only"
+        )
 
     def score(self, c: Candidate, model: dict[str, Any], test: pd.DataFrame) -> float:
-        if not model.get("valid") or len(test) < 3:
-            return 0.0
+        if not model.get("valid"):
+            raise CandidateNotScorable(f"no valid fitted model for kind {model.get('kind')!r}")
+        if len(test) < 3:
+            raise CandidateNotScorable("fewer than 3 rows in the evaluation partition")
         kind = model["kind"]
         if kind == "linear_association":
             x_name, y_name = c.payload["predictor"], c.payload["outcome"]
             pair = test[[x_name, y_name]].apply(pd.to_numeric, errors="coerce").dropna()
             if len(pair) < 3:
-                return 0.0
+                raise CandidateNotScorable(
+                    f"fewer than 3 usable numeric rows for {x_name!r} against {y_name!r} to score"
+                )
             x = pair[x_name].to_numpy(float)
             y = pair[y_name].to_numpy(float)
             slope = float(model["slope"])
@@ -255,10 +264,12 @@ class UploadedTableDomain:
             group, outcome = c.payload["group"], c.payload["outcome"]
             temp = pd.DataFrame({"g": test[group].astype(str), "y": pd.to_numeric(test[outcome], errors="coerce")}).dropna()
             if len(temp) < 3:
-                return 0.0
+                raise CandidateNotScorable(
+                    f"fewer than 3 usable rows for {outcome!r} grouped by {group!r} to score"
+                )
             pred = np.array([model["means"].get(label, model["overall"]) for label in temp["g"]], dtype=float)
             return _r2(temp["y"].to_numpy(float), pred)
-        return 0.0
+        raise CandidateNotScorable(f"no scoring rule for kind {kind!r}")
 
     def baseline_score(self, test: Any) -> float:
         return 0.0

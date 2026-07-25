@@ -31,7 +31,12 @@ class ReportCompiler:
     ) -> str:
         findings = result.get("findings", [])
         survived = [f for f in findings if f.get("final_status") in {"supported", "challenged", "provisional"} and not any(a.get("killed") for a in f.get("falsifications", []))]
-        failed = [f for f in findings if f not in survived]
+        # A candidate the domain could not evaluate was never attacked, so it belongs in
+        # neither bucket. Reporting it as failed would describe a refutation that no
+        # evidence supports.
+        unscorable = [f for f in findings if f.get("final_status") == "unscorable"]
+        failed = [f for f in findings if f not in survived and f not in unscorable]
+        scored = len(findings) - len(unscorable)
         selected = plan.get("selected_dataset", {})
         lines: list[str] = [
             f"# Orbita Research Dossier: {case['name']}",
@@ -47,14 +52,26 @@ class ReportCompiler:
         ]
         if survived:
             lines.append(
-                f"Orbita froze and tested {len(findings)} candidate relationships. "
+                f"Orbita froze and tested {scored} candidate relationships. "
                 f"{len(survived)} survived the configured held-out and cross-seed attacks; "
                 f"{len(failed)} were refuted, unstable, or unresolved."
             )
+        elif scored:
+            lines.append(
+                f"Orbita tested {scored} candidate relationships, but none survived every configured attack. "
+                "This is a valid null result and should not be rewritten as a discovery."
+            )
         else:
             lines.append(
-                f"Orbita tested {len(findings)} candidate relationships, but none survived every configured attack. "
-                "This is a valid null result and should not be rewritten as a discovery."
+                f"Orbita evaluated no candidate in this run: all {len(unscorable)} were unscorable "
+                "against the selected dataset. This is not a null result and carries no evidence "
+                "for or against any candidate. Bind each candidate to columns this domain can "
+                "measure, or analyse them outside the numeric falsification route."
+            )
+        if unscorable and scored:
+            lines.append(
+                f"A further {len(unscorable)} candidate(s) could not be evaluated at all and are "
+                "reported separately; they were neither refuted nor supported."
             )
         lines += [
             "",
@@ -118,6 +135,30 @@ class ReportCompiler:
                 f"status `{finding.get('final_status')}`, score {_fmt(finding.get('verdict', {}).get('score'))}; "
                 f"failed: {', '.join(killed_by) or 'did not reach the governed threshold'}."
             )
+
+        if unscorable:
+            lines += [
+                "",
+                "## Candidates that could not be evaluated",
+                "",
+                "These were proposed but never measured against the dataset, so this run is "
+                "evidence neither for nor against them. They are preserved in the hash-chained "
+                "ledger and deliberately excluded from the belief graph.",
+                "",
+            ]
+            for finding in unscorable:
+                candidate = finding.get("candidate", {})
+                reason = next(
+                    (
+                        attack["detail"]["unscorable"]
+                        for attack in finding.get("falsifications", [])
+                        if attack.get("detail", {}).get("unscorable")
+                    ),
+                    "the domain could not evaluate this candidate",
+                )
+                lines.append(
+                    f"- **{candidate.get('statement', candidate.get('id'))}** — not evaluated: {reason}."
+                )
 
         lines += [
             "",
