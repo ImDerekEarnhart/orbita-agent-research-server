@@ -207,9 +207,31 @@ class ResearchMVP:
     ) -> dict[str, Any]:
         candidate_to_claim: dict[str, str] = {}
         claim_ids: list[str] = []
+        unscorable: list[dict[str, Any]] = []
         for finding in result.get("findings", []):
             candidate = finding["candidate"]
             payload = candidate.get("payload", {})
+            if finding.get("final_status") == "unscorable":
+                # Nothing was measured, so there is nothing to believe either way. The
+                # candidate stays in the hash-chained ledger and the dossier as a
+                # proposal that could not be evaluated, but it never becomes a claim:
+                # a graph node carrying pass/fail checks would assert evidence that
+                # was never gathered.
+                unscorable.append(
+                    {
+                        "candidate_id": candidate["id"],
+                        "statement": candidate["statement"],
+                        "reason": next(
+                            (
+                                attack["detail"]["unscorable"]
+                                for attack in finding.get("falsifications", [])
+                                if attack.get("detail", {}).get("unscorable")
+                            ),
+                            "the domain could not evaluate this candidate",
+                        ),
+                    }
+                )
+                continue
             scope = {
                 "kind": payload.get("kind"),
                 "predictor": payload.get("predictor"),
@@ -277,7 +299,10 @@ class ResearchMVP:
         # Populate derivation edges after every candidate has a durable claim ID.
         for finding in result.get("findings", []):
             candidate = finding["candidate"]
-            child_id = candidate_to_claim[candidate["id"]]
+            child_id = candidate_to_claim.get(candidate["id"])
+            if child_id is None:
+                # An unscorable candidate has no claim, so it has no derivation edges.
+                continue
             parents = [candidate_to_claim[p] for p in candidate.get("parents", []) if p in candidate_to_claim]
             if parents:
                 self.ledger.add_proof(
@@ -316,7 +341,11 @@ class ResearchMVP:
                 finding_type=item.get("type", "data_quality"),
                 source_candidate_id=f"quality:{index}",
             )
-        return {"claim_ids": list(dict.fromkeys(claim_ids)), "candidate_to_claim": candidate_to_claim}
+        return {
+            "claim_ids": list(dict.fromkeys(claim_ids)),
+            "candidate_to_claim": candidate_to_claim,
+            "unscorable_candidates": unscorable,
+        }
 
     # ------------------------------------------------------------------
     # Belief memory facade

@@ -5,10 +5,13 @@ import json
 import mimetypes
 import shutil
 import zipfile
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+from .chatgpt_export import looks_like_chatgpt_export, messages_to_frame, parse_conversations
 
 
 class IngestionError(RuntimeError):
@@ -90,8 +93,19 @@ def profile_dataframe(df: pd.DataFrame) -> dict[str, Any]:
 class ArtifactIngestor:
     """Preserve uploads, extract supported content, and create deterministic profiles."""
 
-    def __init__(self, max_unpacked_bytes: int = 250_000_000):
+    # Suffixes never opened as an archive member. Nested archives are the classic zip
+    # bomb shape, so they are preserved and inventoried but never expanded.
+    NESTED_ARCHIVE_SUFFIXES = {".zip", ".gz", ".tar", ".tgz", ".bz2", ".xz", ".7z", ".rar"}
+
+    def __init__(
+        self,
+        max_unpacked_bytes: int = 250_000_000,
+        max_members_parsed: int = 500,
+        max_member_bytes: int = 100_000_000,
+    ):
         self.max_unpacked_bytes = max_unpacked_bytes
+        self.max_members_parsed = max_members_parsed
+        self.max_member_bytes = max_member_bytes
 
     def ingest(self, source: str | Path, destination_dir: str | Path) -> dict[str, Any]:
         source = Path(source)
@@ -138,6 +152,16 @@ class ArtifactIngestor:
                 return self._text_result(base, json.dumps(rows, indent=2), destination_dir, stored.stem)
             if suffix in {".json", ".ipynb"}:
                 obj = json.loads(stored.read_text(encoding="utf-8"))
+                # Recognised by shape rather than filename, so a renamed export still
+                # parses and an unrelated conversations.json does not get misread.
+                if looks_like_chatgpt_export(obj):
+                    messages, summary = parse_conversations(obj)
+                    result = self._table_result(
+                        base, messages_to_frame(messages), destination_dir, stored.stem
+                    )
+                    result["artifact_kind"] = "chat_export"
+                    result["profile"]["chat_export"] = asdict(summary)
+                    return result
                 if isinstance(obj, list) and obj and all(isinstance(row, dict) for row in obj):
                     return self._table_result(base, pd.DataFrame(obj), destination_dir, stored.stem)
                 if isinstance(obj, dict):
@@ -219,15 +243,65 @@ class ArtifactIngestor:
                 if extract_dir.resolve() not in target.parents and target != extract_dir.resolve():
                     raise IngestionError("ZIP contains an unsafe path")
             archive.extractall(extract_dir)
+        # Members are parsed, not merely listed. An archive whose contents stay opaque
+        # is preserved provenance and nothing else; the point of accepting a zip is to
+        # reach the tables and documents inside it.
+        parsed_count = 0
+        skipped: list[dict[str, Any]] = []
         for path in sorted(extract_dir.rglob("*")):
-            if path.is_file():
-                members.append({"name": str(path.relative_to(extract_dir)), "size_bytes": path.stat().st_size})
+            if not path.is_file():
+                continue
+            size_bytes = path.stat().st_size
+            entry: dict[str, Any] = {
+                "name": str(path.relative_to(extract_dir)),
+                "size_bytes": size_bytes,
+            }
+            suffix = path.suffix.lower()
+            if suffix in self.NESTED_ARCHIVE_SUFFIXES:
+                entry["parse_status"] = "skipped"
+                entry["skip_reason"] = "nested archives are preserved but never expanded"
+                skipped.append(entry)
+            elif size_bytes > self.max_member_bytes:
+                entry["parse_status"] = "skipped"
+                entry["skip_reason"] = f"member exceeds {self.max_member_bytes} bytes"
+                skipped.append(entry)
+            elif parsed_count >= self.max_members_parsed:
+                entry["parse_status"] = "skipped"
+                entry["skip_reason"] = f"only the first {self.max_members_parsed} members are parsed"
+                skipped.append(entry)
+            else:
+                # Reuse the top-level dispatch so every parser and its error handling
+                # apply identically to a member. The member already sits in its own
+                # directory, so this parses in place without copying.
+                member = self.ingest(path, path.parent)
+                parsed_count += 1
+                entry.update(
+                    {
+                        "parse_status": member["parse_status"],
+                        "artifact_kind": member["artifact_kind"],
+                        "sha256": member["sha256"],
+                        "extracted_path": member["extracted_path"],
+                        "profile": member["profile"],
+                        "error": member["error"],
+                    }
+                )
+            members.append(entry)
+
+        tables = [m for m in members if m.get("artifact_kind") == "table"]
         base.update(
             {
-                "parse_status": "parsed",
+                "parse_status": "parsed" if parsed_count else "partially_parsed",
                 "artifact_kind": "archive",
                 "extracted_path": str(extract_dir.resolve()),
-                "profile": {"members": members[:200], "member_count": len(members), "unpacked_bytes": total},
+                "profile": {
+                    "members": members[:200],
+                    "member_count": len(members),
+                    "parsed_member_count": parsed_count,
+                    "skipped_member_count": len(skipped),
+                    "table_member_count": len(tables),
+                    "unpacked_bytes": total,
+                    "members_truncated_in_profile": len(members) > 200,
+                },
             }
         )
         return base

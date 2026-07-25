@@ -41,8 +41,20 @@ class AgentGateway:
         self.knowledge = KnowledgeStore(self.config.knowledge_db)
         self.improvements = ImprovementLab(self.config.improvement_db, self.service)
         self._lock = threading.RLock()
+        self._children: list[AgentGateway] = []
+
+    def for_tenant(self, tenant: str) -> AgentGateway:
+        """Open a gateway confined to one tenant, closed when this one closes."""
+        child = AgentGateway(self.config.for_tenant(tenant))
+        with self._lock:
+            self._children.append(child)
+        return child
 
     def close(self) -> None:
+        with self._lock:
+            children, self._children = self._children, []
+        for child in children:
+            child.close()
         self.improvements.close()
         self.knowledge.close()
         self.service.close()
@@ -120,6 +132,11 @@ class AgentGateway:
         payload = content.encode("utf-8")
         if len(payload) > self.config.max_inline_bytes:
             raise ValueError(f"Inline payload exceeds {self.config.max_inline_bytes} bytes")
+        # Resolve the case before staging anything. Without this the insert fails on a
+        # foreign key deep in storage, which both writes a temporary file for a case
+        # that cannot accept it and reports a raw sqlite error instead of "unknown case".
+        with self._lock:
+            self.service.store.get_case(case_id)
         staging = self.config.inbox / f"upload_{uuid.uuid4().hex}"
         staging.mkdir(parents=True, exist_ok=False)
         path = staging / safe_name

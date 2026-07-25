@@ -8,7 +8,17 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Protocol, runtime_checkable
 
-STATUS = ["refuted", "unknown", "provisional", "challenged", "supported"]
+STATUS = ["unscorable", "refuted", "unknown", "provisional", "challenged", "supported"]
+
+
+class CandidateNotScorable(Exception):
+    """Raised when a domain cannot evaluate a candidate at all.
+
+    This is the difference between "the evidence is against this" and "this was never
+    measured". A domain that returns a zero score for a candidate it does not know how
+    to fit hands every falsifier a guaranteed kill, and the candidate is then recorded
+    as refuted on evidence that was never gathered. Domains must raise this instead.
+    """
 
 
 @dataclass
@@ -107,8 +117,17 @@ class Ledger:
         return f
 
 
+def is_unscorable(falsification: Falsification) -> bool:
+    return bool(falsification.detail.get("unscorable"))
+
+
 def resolve_status(verdict: Verdict, falsifications: list[Falsification]) -> tuple[str, list[str]]:
-    survived = [x.name for x in falsifications if not x.killed]
+    # An attack that could not be carried out is neither a kill nor a survival, so it
+    # is excluded from `survived` as well. Counting it as survived would let a candidate
+    # nothing could measure be reported as one that withstood everything.
+    survived = [x.name for x in falsifications if not x.killed and not is_unscorable(x)]
+    if any(is_unscorable(x) for x in falsifications):
+        return "unscorable", survived
     if any(x.killed for x in falsifications):
         return "refuted", survived
     return verdict.status, survived

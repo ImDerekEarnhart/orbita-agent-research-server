@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -207,6 +208,27 @@ def build_mcp_server(
         except TenantResolutionError as exc:
             raise DiscoveryGenomeError(str(exc)) from exc
 
+    tenant_gateways: dict[str, AgentGateway] = {}
+    gateway_guard = threading.Lock()
+
+    def _gateway_for_caller() -> AgentGateway:
+        """Return the calling tenant's own research workspace, or refuse.
+
+        Bearer and unauthenticated deployments have a single operator and no way to
+        tell callers apart, so they keep using the shared gateway exactly as before.
+        Under OAuth every caller is resolved to its own tenant first, and an unbound
+        subject is refused rather than quietly served the operator's own research.
+        """
+        if remote_auth.label != "oauth-github":
+            return gateway
+        tenant = _resolve_tenant()
+        with gateway_guard:
+            existing = tenant_gateways.get(tenant)
+            if existing is None:
+                existing = gateway.for_tenant(tenant)
+                tenant_gateways[tenant] = existing
+            return existing
+
     mcp = FastMCP(
         "Orbita Agent Research Server",
         instructions=(
@@ -258,12 +280,19 @@ def build_mcp_server(
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_capabilities() -> dict[str, Any]:
         """Describe available research routes, hard limits, approval rules, and epistemic boundaries."""
-        return gateway.capabilities()
+        # Capabilities must stay readable before a tenant is bound, so this is the one
+        # place that falls back to the base description instead of refusing. It reports
+        # the caller's own active policy whenever the caller has a tenant, so no other
+        # tenant's policy values are ever echoed back.
+        try:
+            return _gateway_for_caller().capabilities()
+        except TenantResolutionError:
+            return gateway.capabilities()
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_list_cases() -> list[dict[str, Any]]:
         """List local research cases without returning large plans or findings."""
-        return gateway.list_cases()
+        return _gateway_for_caller().list_cases()
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_genome_status() -> dict[str, Any]:
@@ -338,7 +367,7 @@ def build_mcp_server(
         """Create one review-needed executable operator, optionally linked to an existing Orbita research case."""
         provenance = dict(evidence or {})
         if source_case_id:
-            case = _case_metadata(gateway.case_context(source_case_id))
+            case = _case_metadata(_gateway_for_caller().case_context(source_case_id))
             provenance.update(
                 {
                     "source_case_id": source_case_id,
@@ -383,7 +412,7 @@ def build_mcp_server(
         receipt_hash: str | None = None,
     ) -> dict[str, Any]:
         """Attach one scoped case outcome to an operator without changing or erasing the underlying case."""
-        gateway.case_context(case_id)
+        _gateway_for_caller().case_context(case_id)
         return _genome_for_caller().add_operator_evidence(
             operator_id,
             {
@@ -469,42 +498,42 @@ def build_mcp_server(
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_create_case(name: str, goal: str = "", domain_hint: str | None = None) -> dict[str, Any]:
         """Create a research case. Leave goal blank for bounded open discovery."""
-        return gateway.create_case(name=name, goal=goal, domain_hint=domain_hint)
+        return _gateway_for_caller().create_case(name=name, goal=goal, domain_hint=domain_hint)
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_add_inline_file(case_id: str, filename: str, content: str) -> dict[str, Any]:
         """Attach a UTF-8 text/table file. CSV, TSV, JSON(L), Markdown, text, code, and notebooks are allowed."""
-        return gateway.add_inline_file(case_id=case_id, filename=filename, content=content)
+        return _gateway_for_caller().add_inline_file(case_id=case_id, filename=filename, content=content)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_case_context(case_id: str) -> dict[str, Any]:
         """Read deterministic data profiles, plan versions, and compact run state before proposing analysis."""
-        return gateway.case_context(case_id)
+        return _gateway_for_caller().case_context(case_id)
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_compile_plan(case_id: str, max_candidates: int | None = None) -> dict[str, Any]:
         """Compile with the active policy; optionally override only the bounded candidate budget."""
-        return gateway.compile_plan(case_id, max_candidates=max_candidates)
+        return _gateway_for_caller().compile_plan(case_id, max_candidates=max_candidates)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_improvement_status() -> dict[str, Any]:
         """Read the active research policy, exact approval phrases, and self-improvement safety boundary."""
-        return gateway.improvement_status()
+        return _gateway_for_caller().improvement_status()
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_improvement_history(limit: int = 25) -> dict[str, Any]:
         """List versioned policies and recent proposals without mutating the active policy."""
-        return gateway.improvement_history(limit=limit)
+        return _gateway_for_caller().improvement_history(limit=limit)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_get_improvement(candidate_id: str) -> dict[str, Any]:
         """Fetch an exact proposal, candidate hash, latest replay, and evaluation hash for review."""
-        return gateway.get_improvement(candidate_id)
+        return _gateway_for_caller().get_improvement(candidate_id)
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_suggest_improvement() -> dict[str, Any]:
         """Learn from completed runs and create one conservative proposal; never evaluates or activates it."""
-        return gateway.suggest_improvement()
+        return _gateway_for_caller().suggest_improvement()
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_propose_improvement(
@@ -514,7 +543,7 @@ def build_mcp_server(
         acceptance_criteria: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Propose allowlisted policy changes and explicit replay criteria; arbitrary code changes are rejected."""
-        return gateway.propose_improvement(
+        return _gateway_for_caller().propose_improvement(
             name=name,
             rationale=rationale,
             patch=patch,
@@ -524,7 +553,7 @@ def build_mcp_server(
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_evaluate_improvement(candidate_id: str, case_ids: list[str] | None = None) -> dict[str, Any]:
         """Replay active and proposed policies on exact completed-case benchmarks and store a hash-bound comparison."""
-        return gateway.evaluate_improvement(candidate_id, case_ids=case_ids)
+        return _gateway_for_caller().evaluate_improvement(candidate_id, case_ids=case_ids)
 
     @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
     def orbita_promote_improvement(
@@ -535,7 +564,7 @@ def build_mcp_server(
         confirmation: str,
     ) -> dict[str, Any]:
         """Activate an eligible proposal only after exact candidate, evaluation, reviewer, and phrase confirmation."""
-        return gateway.promote_improvement(
+        return _gateway_for_caller().promote_improvement(
             candidate_id,
             expected_candidate_hash=expected_candidate_hash,
             expected_evaluation_hash=expected_evaluation_hash,
@@ -551,7 +580,7 @@ def build_mcp_server(
         confirmation: str,
     ) -> dict[str, Any]:
         """Restore a previously active policy using an exact active-policy hash and rollback confirmation."""
-        return gateway.rollback_improvement(
+        return _gateway_for_caller().rollback_improvement(
             target_policy_id,
             expected_active_policy_hash=expected_active_policy_hash,
             reviewer=reviewer,
@@ -561,12 +590,12 @@ def build_mcp_server(
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_submit_plan(case_id: str, plan: dict[str, Any], compiler: str = "external-ai") -> dict[str, Any]:
         """Submit an AI-authored plan using only fields visible in case context; it remains unapproved."""
-        return gateway.submit_plan(case_id, plan=plan, compiler=compiler)
+        return _gateway_for_caller().submit_plan(case_id, plan=plan, compiler=compiler)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_get_plan(plan_id: str) -> dict[str, Any]:
         """Fetch the complete immutable plan and its SHA-256 hash for review."""
-        return gateway.get_plan(plan_id)
+        return _gateway_for_caller().get_plan(plan_id)
 
     @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
     def orbita_approve_plan(
@@ -576,7 +605,7 @@ def build_mcp_server(
         confirmation: str,
     ) -> dict[str, Any]:
         """Approve one exact frozen plan after review. Use the exact confirmation phrase reported by capabilities."""
-        return gateway.approve_plan(
+        return _gateway_for_caller().approve_plan(
             plan_id,
             expected_plan_hash=expected_plan_hash,
             reviewer=reviewer,
@@ -586,47 +615,47 @@ def build_mcp_server(
     @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
     def orbita_run_discovery(case_id: str, plan_id: str) -> dict[str, Any]:
         """Execute an already approved plan and persist findings, failed checks, claims, and reports."""
-        return gateway.run_discovery(case_id, plan_id=plan_id)
+        return _gateway_for_caller().run_discovery(case_id, plan_id=plan_id)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_get_run(run_id: str, findings_offset: int = 0, findings_limit: int = 50) -> dict[str, Any]:
         """Read a paginated run result, including both surviving and refuted candidates."""
-        return gateway.get_run(run_id, findings_offset=findings_offset, findings_limit=findings_limit)
+        return _gateway_for_caller().get_run(run_id, findings_offset=findings_offset, findings_limit=findings_limit)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_case_claims(case_id: str) -> list[dict[str, Any]]:
         """List durable claims linked to a research case."""
-        return gateway.case_claims(case_id)
+        return _gateway_for_caller().case_claims(case_id)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_claim_history(claim_id: str) -> dict[str, Any]:
         """Reconstruct a claim's evidence, checks, contradictions, dependencies, events, and supersession chain."""
-        return gateway.claim_history(claim_id)
+        return _gateway_for_caller().claim_history(claim_id)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_claim_impact(claim_id: str) -> dict[str, Any]:
         """Show which downstream claims depend on a claim and how support can collapse."""
-        return gateway.claim_impact(claim_id)
+        return _gateway_for_caller().claim_impact(claim_id)
 
     @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
     def orbita_add_contradiction(claim_a: str, claim_b: str, rationale: str) -> dict[str, Any]:
         """Record—not erase—a specific contradiction between two durable claims."""
-        return gateway.add_contradiction(claim_a, claim_b, rationale=rationale)
+        return _gateway_for_caller().add_contradiction(claim_a, claim_b, rationale=rationale)
 
     @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
     def orbita_supersede_claim(claim_id: str, new_statement: str, rationale: str) -> dict[str, Any]:
         """Create a replacement claim while retaining the prior claim and full history."""
-        return gateway.supersede_claim(claim_id, new_statement=new_statement, rationale=rationale)
+        return _gateway_for_caller().supersede_claim(claim_id, new_statement=new_statement, rationale=rationale)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_reexamination_queue() -> list[dict[str, Any]]:
         """List open review tasks created by contradictions, revocations, or dependency collapse."""
-        return gateway.reexamination_queue()
+        return _gateway_for_caller().reexamination_queue()
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_get_report(case_id: str, format: Literal["markdown", "json", "html"] = "markdown") -> dict[str, Any]:
         """Read the newest completed case dossier in Markdown, JSON, or HTML."""
-        return gateway.report(case_id, format=format)
+        return _gateway_for_caller().report(case_id, format=format)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_search_knowledge(query: str, limit: int = 5, source_bundle: str | None = None) -> list[dict[str, Any]]:
@@ -675,17 +704,17 @@ def build_mcp_server(
     @mcp.resource("orbita://cases/{case_id}")
     def case_resource(case_id: str) -> str:
         """Agent-readable case context."""
-        return json.dumps(gateway.case_context(case_id), indent=2, sort_keys=True)
+        return json.dumps(_gateway_for_caller().case_context(case_id), indent=2, sort_keys=True)
 
     @mcp.resource("orbita://claims/{claim_id}")
     def claim_resource(claim_id: str) -> str:
         """Agent-readable complete claim history."""
-        return json.dumps(gateway.claim_history(claim_id), indent=2, sort_keys=True)
+        return json.dumps(_gateway_for_caller().claim_history(claim_id), indent=2, sort_keys=True)
 
     @mcp.resource("orbita://improvements/status")
     def improvement_resource() -> str:
         """Agent-readable active policy and bounded improvement contract."""
-        return json.dumps(gateway.improvement_status(), indent=2, sort_keys=True)
+        return json.dumps(_gateway_for_caller().improvement_status(), indent=2, sort_keys=True)
 
     @mcp.prompt()
     def orbita_research_protocol(goal: str = "Open discovery") -> str:

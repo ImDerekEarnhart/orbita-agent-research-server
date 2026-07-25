@@ -4,7 +4,7 @@ from __future__ import annotations
 from statistics import median
 from typing import Any, Protocol, runtime_checkable
 
-from .core import Candidate, Domain, Falsification
+from .core import Candidate, CandidateNotScorable, Domain, Falsification
 
 
 @runtime_checkable
@@ -24,10 +24,13 @@ class BaselineFalsifier:
     def attempt(self, c: Candidate, evidence: Any, domain: Domain) -> Falsification:
         if not isinstance(domain, FittableDomain):
             return Falsification(self.name, False, detail={"skipped": "domain not fittable"})
-        train, test = domain.splits(evidence, seed=0)
-        model = domain.refit(c, train)
-        score = domain.score(c, model, test)
-        baseline = domain.baseline_score(test)
+        try:
+            train, test = domain.splits(evidence, seed=0)
+            model = domain.refit(c, train)
+            score = domain.score(c, model, test)
+            baseline = domain.baseline_score(test)
+        except CandidateNotScorable as exc:
+            return Falsification(self.name, False, detail={"unscorable": str(exc)})
         delta = score - baseline
         return Falsification(
             self.name,
@@ -46,9 +49,12 @@ class HeldOutFalsifier:
     def attempt(self, c: Candidate, evidence: Any, domain: Domain) -> Falsification:
         if not isinstance(domain, FittableDomain):
             return Falsification(self.name, False, detail={"skipped": "domain not fittable"})
-        train, test = domain.splits(evidence, seed=1)
-        model = domain.refit(c, train)
-        score = domain.score(c, model, test)
+        try:
+            train, test = domain.splits(evidence, seed=1)
+            model = domain.refit(c, train)
+            score = domain.score(c, model, test)
+        except CandidateNotScorable as exc:
+            return Falsification(self.name, False, detail={"unscorable": str(exc)})
         return Falsification(
             self.name,
             killed=score < self.min_score,
@@ -69,10 +75,13 @@ class CrossSeedFalsifier:
         if not isinstance(domain, FittableDomain):
             return Falsification(self.name, False, detail={"skipped": "domain not fittable"})
         scores: list[float] = []
-        for seed in range(2, 2 + self.seeds):
-            train, test = domain.splits(evidence, seed=seed)
-            model = domain.refit(c, train)
-            scores.append(domain.score(c, model, test))
+        try:
+            for seed in range(2, 2 + self.seeds):
+                train, test = domain.splits(evidence, seed=seed)
+                model = domain.refit(c, train)
+                scores.append(domain.score(c, model, test))
+        except CandidateNotScorable as exc:
+            return Falsification(self.name, False, detail={"unscorable": str(exc)})
         med = median(scores)
         spread = max(scores) - min(scores)
         killed = med < self.min_median
