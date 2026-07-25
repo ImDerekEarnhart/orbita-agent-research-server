@@ -16,6 +16,7 @@ from .config import AgentConfig
 from .graph_adapter import analyze_graph, export_lean_certificate
 from .improvement import PROMOTION_PHRASE, ROLLBACK_PHRASE, ImprovementLab
 from .knowledge import KnowledgeStore
+from .archive_policy import ArchivePolicy
 from .memory_index import MemoryIndex, chat_export_members
 from .reversals import find_candidate_reversals
 
@@ -178,8 +179,14 @@ class AgentGateway:
         durable, and a searchable copy is a convenience layered on top of them. The
         error is reported so it is visible rather than silently swallowed.
         """
+        exports = list(chat_export_members(record))
+        if exports:
+            # Checked at indexing too, not only at upload. The inline path can carry a
+            # small export, and a policy enforced at one entrance is not enforced.
+            ArchivePolicy.from_env().ensure(self.config.tenant)
+
         indexed: list[dict[str, Any]] = []
-        for label, extracted in chat_export_members(record):
+        for label, extracted in exports:
             try:
                 frame = pd.read_csv(extracted)
                 indexed.append(
