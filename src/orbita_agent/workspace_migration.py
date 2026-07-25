@@ -20,6 +20,7 @@ Dry-run is the default everywhere, including the CLI.
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import sqlite3
 from dataclasses import dataclass, field
@@ -49,6 +50,29 @@ def _case_ids(database: Path) -> list[str]:
     finally:
         connection.close()
     return [row[0] for row in rows]
+
+
+def _match_ownership(source: Path, target: Path) -> dict[str, Any]:
+    """Give the migrated tree the same owner as the home it came from.
+
+    Migration is normally run by an operator over a shell, which on a container is
+    root, while the service itself runs as an unprivileged user. Files copied as root
+    are readable but the service cannot create anything beside them, so the tenant
+    loads and then fails on the first write with a bare permission error. Copying the
+    source home's ownership keeps the migrated tree usable by whoever runs the server.
+
+    Not applicable on Windows, and a no-op when the caller lacks the privilege to
+    change ownership — in that case the caller already owns what it just created.
+    """
+    if not hasattr(os, "chown"):
+        return {"applied": False, "reason": "not a POSIX platform"}
+    try:
+        stat = source.stat()
+        for path in [target, *target.rglob("*")]:
+            os.chown(path, stat.st_uid, stat.st_gid)
+    except (PermissionError, OSError) as exc:
+        return {"applied": False, "reason": f"{type(exc).__name__}: {exc}"}
+    return {"applied": True, "uid": stat.st_uid, "gid": stat.st_gid}
 
 
 @dataclass
@@ -148,6 +172,8 @@ def apply_migration(plan: MigrationPlan) -> dict[str, Any]:
             )
         copied_directories.append({"name": source.name, "file_count": len(source_files)})
 
+    ownership = _match_ownership(plan.source_home, plan.target_home)
+
     target_case_ids = _case_ids(plan.target_home / "orbita_agent.db")
     if target_case_ids != plan.source_case_ids:
         missing = set(plan.source_case_ids) - set(target_case_ids)
@@ -163,5 +189,6 @@ def apply_migration(plan: MigrationPlan) -> dict[str, Any]:
         "case_count": len(target_case_ids),
         "case_ids": target_case_ids,
         "source_preserved_at": str(plan.source_home),
+        "ownership": ownership,
         **plan.describe(),
     }
