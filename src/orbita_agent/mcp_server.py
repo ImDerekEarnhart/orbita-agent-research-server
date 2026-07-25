@@ -3,9 +3,11 @@ from __future__ import annotations
 import hmac
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.fastmcp import FastMCP
@@ -21,10 +23,12 @@ from .genome_client import (
     RESULT_RECORD_PHRASE,
     TOURNAMENT_FREEZE_PHRASE,
     DiscoveryGenomeClient,
+    DiscoveryGenomeError,
     hash_json,
     tournament_result_receipt,
 )
 from .oauth import ORBITA_SCOPE, GitHubOAuthProvider
+from .tenancy import LegacySinglePrincipal, TenantResolutionError, build_registry
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
@@ -81,7 +85,13 @@ def _integer_env(name: str, default: int) -> int:
         raise RuntimeError(f"{name} must be an integer") from exc
 
 
-def _remote_auth(config: AgentConfig, host: str, port: int) -> RemoteAuth:
+def _remote_auth(
+    config: AgentConfig,
+    host: str,
+    port: int,
+    *,
+    on_identity: Callable[[str, str], None] | None = None,
+) -> RemoteAuth:
     token = os.getenv("ORBITA_AGENT_API_TOKEN", "")
     require_auth = os.getenv("ORBITA_AGENT_REQUIRE_AUTH", "").strip().lower() in {"1", "true", "yes", "on"}
     auth_mode = os.getenv("ORBITA_AGENT_AUTH_MODE", "").strip().lower()
@@ -116,6 +126,7 @@ def _remote_auth(config: AgentConfig, host: str, port: int) -> RemoteAuth:
             allowed_github_users=allowed_users,
             access_token_ttl=_integer_env("ORBITA_OAUTH_ACCESS_TOKEN_TTL", 3600),
             refresh_token_ttl=_integer_env("ORBITA_OAUTH_REFRESH_TOKEN_TTL", 30 * 24 * 3600),
+            on_identity=on_identity,
         )
         settings = AuthSettings(
             issuer_url=public_url,
@@ -157,17 +168,45 @@ def build_mcp_server(
 ) -> tuple[FastMCP, AgentGateway]:
     gateway = gateway or AgentGateway(config)
     genome = DiscoveryGenomeClient()
-    remote_auth = _remote_auth(gateway.config, host, port)
+    tenants = build_registry(gateway.config.home)
+    remote_auth = _remote_auth(gateway.config, host, port, on_identity=tenants.record_identity)
+
     if not genome.config.missing() and remote_auth.label == "oauth-github":
         oauth_users = {
             value.strip().casefold()
             for value in os.getenv("ORBITA_OAUTH_ALLOWED_GITHUB_USERS", "").split(",")
             if value.strip()
         }
-        if len(oauth_users) != 1:
+        # More than one allowed sign-in identity is fine, but only once every identity
+        # can be resolved to its own tenant. Refusing here keeps a multi-user
+        # deployment from silently serving one shared Genome tenant.
+        if len(oauth_users) > 1 and LegacySinglePrincipal.from_env() is None and not tenants.list_bindings():
             raise RuntimeError(
-                "A configured Discovery Genome bridge requires exactly one allowed GitHub OAuth user"
+                "Multiple GitHub OAuth users are allowed but no Discovery Genome tenant "
+                "bindings exist; bind each identity with `orbita-agent tenants bind` or set "
+                "ORBITA_GENOME_TENANT_BINDINGS before serving the Genome bridge"
             )
+
+    def _resolve_tenant() -> str:
+        """Resolve the calling identity to exactly one Genome tenant, or refuse."""
+        if remote_auth.label != "oauth-github":
+            # Bearer and unauthenticated modes have a single deployment operator and no
+            # way to distinguish callers, so multi-tenancy is not offered at all.
+            username = os.getenv("ORBITA_DISCOVERY_GENOME_USERNAME", "").strip()
+            if not username:
+                raise TenantResolutionError(
+                    "single-operator deployments must set ORBITA_DISCOVERY_GENOME_USERNAME"
+                )
+            return username
+        token = get_access_token()
+        return tenants.resolve(token.subject if token else None)
+
+    def _genome_for_caller() -> DiscoveryGenomeClient:
+        try:
+            return genome.for_username(_resolve_tenant())
+        except TenantResolutionError as exc:
+            raise DiscoveryGenomeError(str(exc)) from exc
+
     mcp = FastMCP(
         "Orbita Agent Research Server",
         instructions=(
@@ -229,29 +268,63 @@ def build_mcp_server(
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_genome_status() -> dict[str, Any]:
         """Check the tenant-scoped Discovery Genome bridge and report exact approval phrases."""
+        deployment_missing = genome.config.missing()
+        tenancy: dict[str, Any] = {
+            "authentication": remote_auth.label,
+            **tenants.describe(),
+        }
+        if deployment_missing:
+            status: dict[str, Any] = {"configured": False, "missing": deployment_missing}
+        else:
+            try:
+                bound = _genome_for_caller()
+            except DiscoveryGenomeError as exc:
+                # Status stays diagnosable when the caller has no tenant. It reports the
+                # refusal instead of raising, and still never names another tenant.
+                tenancy["tenant_bound"] = False
+                tenancy["reason"] = str(exc)
+                status = {"configured": True, "reachable": False}
+            else:
+                tenancy["tenant_bound"] = True
+                status = {"configured": True, **bound.status()}
+
         return {
-            **genome.status(),
+            **status,
+            "tenancy": tenancy,
             "approval_phrases": {
                 "freeze_operator": OPERATOR_FREEZE_PHRASE,
                 "freeze_tournament": TOURNAMENT_FREEZE_PHRASE,
                 "record_result": RESULT_RECORD_PHRASE,
             },
             "safety": {
-                "tenant_selected_by": "deployment allowlist",
+                "tenant_selected_by": tenancy["tenant_selected_by"],
                 "database_exposed": False,
                 "automatic_policy_promotion": False,
             },
         }
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_genome_whoami() -> dict[str, Any]:
+        """Report the authenticated subject and whether it resolves to a Genome tenant."""
+        token = get_access_token() if remote_auth.label == "oauth-github" else None
+        subject = token.subject if token else None
+        try:
+            _resolve_tenant()
+        except TenantResolutionError as exc:
+            return {"subject": subject, "tenant_bound": False, "reason": str(exc)}
+        # The resolved tenant name is deliberately not returned; callers only need to
+        # know that their own identity is bound.
+        return {"subject": subject, "tenant_bound": True}
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_genome_list_operators() -> dict[str, Any]:
         """List versioned discovery operators, executable contracts, states, and server-generated review hashes."""
-        return genome.list_operators()
+        return _genome_for_caller().list_operators()
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_genome_seed_operators() -> dict[str, Any]:
         """Idempotently seed the seven review-needed cross-domain operator families; nothing is frozen or proven."""
-        return genome.seed_operators()
+        return _genome_for_caller().seed_operators()
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_genome_create_operator(
@@ -284,7 +357,7 @@ def build_mcp_server(
         }
         if source_case_id:
             payload["source_operator_id"] = f"case:{source_case_id}"
-        return genome.create_operator(payload)
+        return _genome_for_caller().create_operator(payload)
 
     @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
     def orbita_genome_freeze_operator(
@@ -293,7 +366,7 @@ def build_mcp_server(
         confirmation: str,
     ) -> dict[str, Any]:
         """Freeze exactly one reviewed operator contract; requires its current review hash and exact confirmation."""
-        return genome.freeze_operator(
+        return _genome_for_caller().freeze_operator(
             operator_id,
             expected_review_hash=expected_review_hash,
             confirmation=confirmation,
@@ -311,7 +384,7 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         """Attach one scoped case outcome to an operator without changing or erasing the underlying case."""
         gateway.case_context(case_id)
-        return genome.add_operator_evidence(
+        return _genome_for_caller().add_operator_evidence(
             operator_id,
             {
                 "case_id": case_id,
@@ -326,17 +399,17 @@ def build_mcp_server(
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_genome_list_tournaments() -> dict[str, Any]:
         """List blind operator tournaments and their evaluated-entry counts."""
-        return genome.list_tournaments()
+        return _genome_for_caller().list_tournaments()
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_genome_get_tournament(tournament_id: str) -> dict[str, Any]:
         """Read a tournament, entries, predictions, and its server-generated prospective manifest review hash."""
-        return genome.get_tournament(tournament_id)
+        return _genome_for_caller().get_tournament(tournament_id)
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_genome_create_tournament(name: str, target: dict[str, Any]) -> dict[str, Any]:
         """Create a draft blind-discovery tournament around one declared unseen target."""
-        return genome.create_tournament({"name": name, "target": target})
+        return _genome_for_caller().create_tournament({"name": name, "target": target})
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_genome_add_tournament_entry(
@@ -345,7 +418,7 @@ def build_mcp_server(
         prediction: dict[str, Any],
     ) -> dict[str, Any]:
         """Add one frozen operator and its falsifiable vanish/recovery/refuter prediction to a draft tournament."""
-        return genome.add_tournament_entry(
+        return _genome_for_caller().add_tournament_entry(
             tournament_id,
             {"operator_id": operator_id, "prediction": prediction},
         )
@@ -357,7 +430,7 @@ def build_mcp_server(
         confirmation: str,
     ) -> dict[str, Any]:
         """Freeze exactly the reviewed blind-tournament manifest; requires its current hash and exact confirmation."""
-        return genome.freeze_tournament(
+        return _genome_for_caller().freeze_tournament(
             tournament_id,
             expected_review_hash=expected_review_hash,
             confirmation=confirmation,
@@ -373,7 +446,7 @@ def build_mcp_server(
         confirmation: str,
     ) -> dict[str, Any]:
         """Record a result once; requires the exact result hash and explicit human confirmation."""
-        return genome.record_tournament_result(
+        return _genome_for_caller().record_tournament_result(
             tournament_id,
             entry_id,
             verdict=verdict,

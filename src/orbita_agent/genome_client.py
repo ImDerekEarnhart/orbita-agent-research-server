@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import quote
@@ -46,8 +46,11 @@ def tournament_result_receipt(
 class DiscoveryGenomeConfig:
     base_url: str
     service_token: str
-    username: str
+    username: str = ""
     timeout_seconds: float = 20.0
+
+    def with_username(self, username: str) -> DiscoveryGenomeConfig:
+        return replace(self, username=username.strip())
 
     @classmethod
     def from_env(cls) -> DiscoveryGenomeConfig:
@@ -64,13 +67,16 @@ class DiscoveryGenomeConfig:
         )
 
     def missing(self) -> list[str]:
+        """Deployment-level configuration that must be present for any tenant.
+
+        The tenant username is deliberately absent: it is resolved per request from
+        the authenticated subject, not from deployment configuration.
+        """
         missing = []
         if not self.base_url:
             missing.append("ORBITA_DISCOVERY_GENOME_URL")
         if len(self.service_token) < 32:
             missing.append("ORBITA_DISCOVERY_GENOME_SERVICE_TOKEN")
-        if not self.username:
-            missing.append("ORBITA_DISCOVERY_GENOME_USERNAME")
         return missing
 
 
@@ -80,11 +86,23 @@ class DiscoveryGenomeClient:
     def __init__(self, config: DiscoveryGenomeConfig | None = None):
         self.config = config or DiscoveryGenomeConfig.from_env()
 
+    def for_username(self, username: str) -> DiscoveryGenomeClient:
+        """Return a client bound to one resolved tenant, sharing this deployment config."""
+        bound = username.strip()
+        if not bound:
+            raise DiscoveryGenomeError("a Discovery Genome tenant username is required")
+        return type(self)(self.config.with_username(bound))
+
     def _require_configured(self) -> None:
         missing = self.config.missing()
         if missing:
             raise DiscoveryGenomeError(
                 "Discovery Genome bridge is not configured; missing: " + ", ".join(missing)
+            )
+        if not self.config.username.strip():
+            raise DiscoveryGenomeError(
+                "this Discovery Genome client is not bound to a tenant; "
+                "requests must be made through a client resolved from the authenticated identity"
             )
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:

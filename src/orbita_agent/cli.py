@@ -11,6 +11,7 @@ from typing import Any
 from .config import AgentConfig
 from .gateway import APPROVAL_PHRASE, AgentGateway
 from .mcp_server import build_mcp_server
+from .tenancy import TenantResolutionError, build_registry
 
 
 def _config(home: str | None) -> AgentConfig:
@@ -76,6 +77,73 @@ def _doctor(config: AgentConfig) -> int:
     return 0 if result["ok"] else 1
 
 
+def _tenants(config: AgentConfig, args: argparse.Namespace) -> int:
+    """Operator-only tenant administration.
+
+    Binding is deliberately not exposed as an MCP tool: a caller must never be able to
+    grant itself a tenant. It requires filesystem access to the deployment state.
+    """
+    registry = build_registry(config.ensure().home)
+    action = args.tenant_command
+
+    if action == "list":
+        _print(
+            {
+                "bindings": [binding.public() for binding in registry.list_bindings()],
+                **registry.describe(),
+            }
+        )
+        return 0
+    if action == "identities":
+        _print({"identities": registry.list_identities()})
+        return 0
+    if action == "events":
+        _print({"events": registry.list_events(limit=args.limit)})
+        return 0
+    if action == "unbind":
+        removed = registry.unbind(args.subject)
+        _print({"subject": args.subject, "unbound": removed})
+        return 0 if removed else 1
+
+    subject = args.subject
+    if not subject and args.login:
+        matches = [
+            identity
+            for identity in registry.list_identities()
+            if identity["login"].casefold() == args.login.casefold()
+        ]
+        if len(matches) != 1:
+            _print(
+                {
+                    "ok": False,
+                    "error": (
+                        "no single observed identity for that login; the user must complete "
+                        "GitHub sign-in once, or pass --subject explicitly"
+                    ),
+                    "matches": matches,
+                }
+            )
+            return 1
+        subject = matches[0]["subject"]
+    if not subject:
+        _print({"ok": False, "error": "either --subject or --login is required"})
+        return 1
+
+    try:
+        binding = registry.bind(
+            subject,
+            args.username,
+            note=args.note,
+            allow_shared=args.allow_shared,
+            overwrite=args.overwrite,
+        )
+    except (TenantResolutionError, ValueError) as exc:
+        _print({"ok": False, "error": str(exc)})
+        return 1
+    _print({"ok": True, "binding": binding.public()})
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="orbita-agent",
@@ -91,12 +159,40 @@ def main() -> None:
     subparsers.add_parser("doctor", help="Validate installation and bundled research memory")
     subparsers.add_parser("demo", help="Run a deterministic end-to-end table example")
 
+    tenants = subparsers.add_parser(
+        "tenants", help="Bind authenticated identities to Discovery Genome tenants"
+    )
+    tenant_commands = tenants.add_subparsers(dest="tenant_command", required=True)
+    tenant_commands.add_parser("list", help="List current subject-to-tenant bindings")
+    tenant_commands.add_parser("identities", help="List GitHub identities that have signed in")
+    tenant_events = tenant_commands.add_parser("events", help="Show the binding audit trail")
+    tenant_events.add_argument("--limit", type=int, default=200)
+
+    tenant_bind = tenant_commands.add_parser("bind", help="Bind one identity to one Genome tenant")
+    tenant_bind.add_argument("--subject", help="Authenticated subject, for example github:1234")
+    tenant_bind.add_argument("--login", help="GitHub login, resolved against observed identities")
+    tenant_bind.add_argument("--username", required=True, help="Guided UI Genome username")
+    tenant_bind.add_argument("--note")
+    tenant_bind.add_argument(
+        "--allow-shared",
+        action="store_true",
+        help="Permit a second subject on a tenant that is already bound",
+    )
+    tenant_bind.add_argument(
+        "--overwrite", action="store_true", help="Replace an existing binding for this subject"
+    )
+
+    tenant_unbind = tenant_commands.add_parser("unbind", help="Remove a binding")
+    tenant_unbind.add_argument("--subject", required=True)
+
     args = parser.parse_args()
     config = _config(args.home)
     if args.command == "doctor":
         raise SystemExit(_doctor(config))
     if args.command == "demo":
         raise SystemExit(_demo(config))
+    if args.command == "tenants":
+        raise SystemExit(_tenants(config, args))
 
     mcp, gateway = build_mcp_server(config=config, host=args.host, port=args.port)
     try:

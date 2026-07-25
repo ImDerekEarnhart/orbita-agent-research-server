@@ -45,8 +45,11 @@ Legacy bearer mode remains available through `ORBITA_AGENT_AUTH_MODE=bearer`. It
 ## Known boundaries
 
 - Tool annotations are hints to clients, not an authorization system.
-- OAuth authenticates an allowed GitHub identity but v0.3.0 still uses one shared Orbita research workspace; it is not
-  tenant-isolated.
+- Discovery Genome access is tenant-isolated: each request is scoped to the tenant bound to the authenticated OAuth
+  subject, and an unbound identity is refused rather than served a default tenant.
+- The **local Orbita research workspace is still shared**. Cases, uploaded files, plans, runs, claims, and the
+  improvement policy live in one state directory common to every authenticated caller. Tenant isolation currently
+  covers the Discovery Genome bridge only. Do not treat this deployment as multi-tenant for research data.
 - Anyone with a valid Orbita access token can call write tools, although plan approval still requires the exact
   frozen hash and phrase.
 - Dynamic client registration is intentionally public as required by MCP OAuth. It can create durable client metadata
@@ -54,7 +57,9 @@ Legacy bearer mode remains available through `ORBITA_AGENT_AUTH_MODE=bearer`. It
 - Registered confidential-client secrets are stored in the protected SQLite volume because the MCP SDK must validate
   them at the token endpoint. Orbita-issued end-user tokens are stored only as hashes.
 - A malicious local user with write access to the state directory can tamper with local files.
-- The product does not provide tenant separation.
+- Tenant separation applies to the Discovery Genome bridge, not to the shared research workspace above.
+- Tenant bindings are trusted operator configuration. Anyone who can write to the state directory can rebind
+  identities, so the state volume is part of the trust boundary.
 - Large but allowed tables can still consume substantial CPU during discovery.
 - Historical replay uses held-out data and invariants but has no external ground truth; eligibility is not proof that
   a proposed policy is scientifically better or unbiased.
