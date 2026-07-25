@@ -162,6 +162,31 @@ class AgentGateway:
             )
         }
 
+    def ingest_upload(self, *, case_id: str, path: Path) -> dict[str, Any]:
+        """Ingest an already-staged file, bypassing the inline text-only size ceiling.
+
+        The caller is responsible for having staged the bytes safely; this only owns
+        resolving the case and handing the file to the ingestor.
+        """
+        with self._lock:
+            self.service.store.get_case(case_id)
+            record = self.service.add_file(case_id, path)
+        return {
+            key: record.get(key)
+            for key in (
+                "id",
+                "case_id",
+                "original_name",
+                "media_type",
+                "size_bytes",
+                "sha256",
+                "parse_status",
+                "artifact_kind",
+                "profile",
+                "error",
+            )
+        }
+
     def case_context(self, case_id: str) -> dict[str, Any]:
         with self._lock:
             case = self.service.store.get_case(case_id)
