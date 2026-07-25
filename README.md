@@ -58,18 +58,46 @@ Configure this MCP service with the matching identity:
 | --- | --- |
 | `ORBITA_DISCOVERY_GENOME_URL` | Guided UI origin, without a trailing API path |
 | `ORBITA_DISCOVERY_GENOME_SERVICE_TOKEN` | The same shared secret |
-| `ORBITA_DISCOVERY_GENOME_USERNAME` | One username from the Guided UI allowlist |
 | `ORBITA_DISCOVERY_GENOME_TIMEOUT` | Optional request timeout in seconds; default 20 |
+| `ORBITA_DISCOVERY_GENOME_USERNAME` | Single-principal fallback; applies only when exactly one GitHub user is allowed |
+| `ORBITA_GENOME_TENANT_BINDINGS` | Optional JSON object mapping authenticated subject to Guided UI username |
+| `ORBITA_GENOME_ALLOW_SHARED_TENANTS` | Optional; permit several subjects on one tenant. Default off |
 
 The bridge exposes operator creation, evidence, blind tournaments, and one-time result recording. Operator and
 tournament freezes require server-generated review hashes plus exact confirmation phrases, and the Guided UI checks
 those hashes inside the same database transaction that freezes the reviewed object. Result receipts bind the target
 tournament ID, entry ID, verdict, and result payload.
 
-A configured Discovery Genome bridge is deliberately single-principal: OAuth mode must allow exactly one GitHub user,
-which maps to the one configured Guided UI username. Deploy a separate isolated MCP service per user until an explicit
-per-request OAuth-subject-to-tenant mapping is implemented. The bridge cannot activate a research-policy improvement
-or select an arbitrary tenant.
+### Tenant isolation
+
+Every Discovery Genome request is scoped to the tenant bound to the **authenticated caller**, resolved per request
+from the OAuth subject. There is no deployment-wide tenant and no default: an authenticated identity with no binding
+is refused rather than served someone else's Genome. The bridge cannot activate a research-policy improvement or
+select an arbitrary tenant.
+
+The GitHub allowlist and the tenant registry are two separate gates. Passing `ORBITA_OAUTH_ALLOWED_GITHUB_USERS` only
+permits sign-in; it never implies access to a tenant.
+
+Bindings are operator-only and require filesystem access to the deployment state. They are deliberately **not**
+exposed as MCP tools, so no caller can grant itself a tenant:
+
+```bash
+orbita-agent tenants identities
+```
+
+```bash
+orbita-agent tenants bind --login SomeUser --username their-guided-ui-username
+```
+
+`tenants list` shows current bindings, `tenants events` prints the append-only audit trail, and `tenants unbind`
+revokes access. Binding by `--login` requires that the user has completed GitHub sign-in once, so their subject is
+known; otherwise pass `--subject github:<id>` explicitly. Two subjects cannot be bound to one tenant unless you pass
+`--allow-shared`, and rebinding a subject requires `--overwrite`.
+
+Existing single-owner deployments keep working with no variable changes. When exactly one GitHub user is allowed and
+`ORBITA_DISCOVERY_GENOME_USERNAME` is set, that user is auto-bound to that tenant on first sign-in. This fallback
+disengages as soon as a second GitHub user is allowed, at which point explicit bindings become mandatory and the
+server refuses to start without them.
 
 ## Install
 

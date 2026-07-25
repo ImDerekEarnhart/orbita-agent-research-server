@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import json
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -120,18 +121,43 @@ def test_github_oauth_mode_is_configured(gateway, monkeypatch):
     assert any(route.path == "/oauth/github/callback" for route in mcp._custom_starlette_routes)
 
 
-def test_genome_bridge_rejects_multiple_oauth_principals(gateway, monkeypatch):
+def _genome_oauth_env(monkeypatch, allowed_users: str) -> None:
     monkeypatch.setenv("ORBITA_AGENT_REQUIRE_AUTH", "1")
     monkeypatch.setenv("ORBITA_AGENT_AUTH_MODE", "oauth-github")
     monkeypatch.setenv("ORBITA_OAUTH_GITHUB_CLIENT_ID", "github-client")
     monkeypatch.setenv("ORBITA_OAUTH_GITHUB_CLIENT_SECRET", "github-secret")
-    monkeypatch.setenv("ORBITA_OAUTH_ALLOWED_GITHUB_USERS", "DerekEarnhart,SecondUser")
+    monkeypatch.setenv("ORBITA_OAUTH_ALLOWED_GITHUB_USERS", allowed_users)
     monkeypatch.setenv("ORBITA_DISCOVERY_GENOME_URL", "https://guided.example")
     monkeypatch.setenv("ORBITA_DISCOVERY_GENOME_SERVICE_TOKEN", "t" * 48)
+    monkeypatch.delenv("ORBITA_GENOME_TENANT_BINDINGS", raising=False)
+    monkeypatch.delenv("ORBITA_DISCOVERY_GENOME_USERNAME", raising=False)
+
+
+def test_genome_bridge_refuses_multiple_principals_without_tenant_bindings(gateway, monkeypatch):
+    _genome_oauth_env(monkeypatch, "DerekEarnhart,SecondUser")
+
+    with pytest.raises(RuntimeError, match="no Discovery Genome tenant bindings exist"):
+        build_mcp_server(gateway=gateway, host="0.0.0.0", port=8000)
+
+
+def test_genome_bridge_serves_multiple_principals_once_they_are_bound(gateway, monkeypatch):
+    _genome_oauth_env(monkeypatch, "DerekEarnhart,SecondUser")
+    monkeypatch.setenv(
+        "ORBITA_GENOME_TENANT_BINDINGS",
+        json.dumps({"github:1": "derek-tenant", "github:2": "second-tenant"}),
+    )
+
+    mcp, _ = build_mcp_server(gateway=gateway, host="0.0.0.0", port=8000)
+    assert mcp.settings.auth is not None
+
+
+def test_single_principal_deployment_still_starts_unchanged(gateway, monkeypatch):
+    """The current production configuration must keep working with no variable changes."""
+    _genome_oauth_env(monkeypatch, "DerekEarnhart")
     monkeypatch.setenv("ORBITA_DISCOVERY_GENOME_USERNAME", "dkscr711")
 
-    with pytest.raises(RuntimeError, match="exactly one allowed GitHub OAuth user"):
-        build_mcp_server(gateway=gateway, host="0.0.0.0", port=8000)
+    mcp, _ = build_mcp_server(gateway=gateway, host="0.0.0.0", port=8000)
+    assert mcp.settings.auth is not None
 
 
 def test_github_oauth_discovery_registration_and_challenge(gateway, monkeypatch):
@@ -221,3 +247,142 @@ def test_github_oauth_discovery_registration_and_challenge(gateway, monkeypatch)
         challenge = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
         assert challenge.status_code == 401
         assert "oauth-protected-resource/mcp" in challenge.headers["www-authenticate"]
+
+
+def test_genome_tools_route_each_authenticated_subject_to_its_own_tenant(gateway, monkeypatch):
+    """The core multi-tenancy guarantee, exercised through the real MCP tool path."""
+    _genome_oauth_env(monkeypatch, "DerekEarnhart,SecondUser")
+    monkeypatch.setenv(
+        "ORBITA_GENOME_TENANT_BINDINGS",
+        json.dumps({"github:1": "derek-tenant", "github:2": "second-tenant"}),
+    )
+    mcp, _ = build_mcp_server(gateway=gateway, host="0.0.0.0", port=8000)
+
+    sent_users: list[str] = []
+
+    class FakeResponse:
+        def read(self):
+            return b'{"operators": []}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def fake_urlopen(request, timeout=None):
+        sent_users.append(request.headers["X-orbita-genome-user"])
+        return FakeResponse()
+
+    monkeypatch.setattr("orbita_agent.genome_client.urlopen", fake_urlopen)
+
+    def as_subject(subject):
+        class FakeToken:
+            def __init__(self):
+                self.subject = subject
+
+        monkeypatch.setattr("orbita_agent.mcp_server.get_access_token", lambda: FakeToken())
+
+    as_subject("github:1")
+    asyncio.run(mcp.call_tool("orbita_genome_list_operators", {}))
+    as_subject("github:2")
+    asyncio.run(mcp.call_tool("orbita_genome_list_operators", {}))
+
+    assert sent_users == ["derek-tenant", "second-tenant"]
+
+
+def test_genome_tools_refuse_an_authenticated_but_unbound_identity(gateway, monkeypatch):
+    _genome_oauth_env(monkeypatch, "DerekEarnhart,SecondUser")
+    monkeypatch.setenv("ORBITA_GENOME_TENANT_BINDINGS", json.dumps({"github:1": "derek-tenant"}))
+    mcp, _ = build_mcp_server(gateway=gateway, host="0.0.0.0", port=8000)
+
+    def explode(*_args, **_kwargs):
+        raise AssertionError("an unbound identity must never reach the Genome service")
+
+    monkeypatch.setattr("orbita_agent.genome_client.urlopen", explode)
+
+    class FakeToken:
+        subject = "github:999"
+
+    monkeypatch.setattr("orbita_agent.mcp_server.get_access_token", lambda: FakeToken())
+
+    with pytest.raises(Exception, match="no Discovery Genome tenant is bound"):
+        asyncio.run(mcp.call_tool("orbita_genome_list_operators", {}))
+
+
+def _complete_github_signin(mcp, client, monkeypatch, *, login: str, github_id: int) -> None:
+    """Drive a full OAuth sign-in so the identity is observed by the tenant registry."""
+    registration = client.post(
+        "/register",
+        json={
+            "redirect_uris": ["https://chatgpt.example.test/oauth/callback"],
+            "token_endpoint_auth_method": "none",
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+            "scope": "orbita:use",
+            "client_name": "ChatGPT",
+        },
+    )
+
+    async def github_user(_code):
+        return {"login": login, "id": github_id}
+
+    monkeypatch.setattr(mcp._auth_server_provider, "_fetch_github_user", github_user)
+    code_verifier = "test-verifier-" * 5
+    digest = hashlib.sha256(code_verifier.encode()).digest()
+    authorization = client.get(
+        "/authorize",
+        params={
+            "client_id": registration.json()["client_id"],
+            "redirect_uri": "https://chatgpt.example.test/oauth/callback",
+            "response_type": "code",
+            "code_challenge": base64.urlsafe_b64encode(digest).decode().rstrip("="),
+            "code_challenge_method": "S256",
+            "state": "chatgpt-state",
+            "scope": "orbita:use",
+            "resource": "https://orbita.example.test/mcp",
+        },
+        follow_redirects=False,
+    )
+    github_state = parse_qs(urlparse(authorization.headers["location"]).query)["state"][0]
+    client.get(
+        "/oauth/github/callback",
+        params={"code": "github-code", "state": github_state},
+        follow_redirects=False,
+    )
+
+
+def test_single_principal_signin_auto_binds_the_legacy_tenant(gateway, monkeypatch):
+    """End-to-end backward compatibility: today's deployment keeps reaching its tenant."""
+    _genome_oauth_env(monkeypatch, "DerekEarnhart")
+    monkeypatch.setenv("ORBITA_DISCOVERY_GENOME_USERNAME", "dkscr711")
+    monkeypatch.setenv("ORBITA_AGENT_PUBLIC_URL", "https://orbita.example.test")
+    mcp, _ = build_mcp_server(gateway=gateway, host="0.0.0.0", port=8000)
+
+    with TestClient(mcp.streamable_http_app()) as client:
+        _complete_github_signin(mcp, client, monkeypatch, login="DerekEarnhart", github_id=1234)
+
+    sent_users: list[str] = []
+
+    class FakeResponse:
+        def read(self):
+            return b'{"operators": []}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def fake_urlopen(request, timeout=None):
+        sent_users.append(request.headers["X-orbita-genome-user"])
+        return FakeResponse()
+
+    monkeypatch.setattr("orbita_agent.genome_client.urlopen", fake_urlopen)
+
+    class FakeToken:
+        subject = "github:1234"
+
+    monkeypatch.setattr("orbita_agent.mcp_server.get_access_token", lambda: FakeToken())
+    asyncio.run(mcp.call_tool("orbita_genome_list_operators", {}))
+    assert sent_users == ["dkscr711"]

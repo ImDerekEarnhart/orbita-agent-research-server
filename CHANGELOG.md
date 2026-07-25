@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- Replaced the single-principal Discovery Genome collapse with per-request tenant resolution from the authenticated
+  OAuth subject. `ORBITA_DISCOVERY_GENOME_USERNAME` is no longer a deployment-wide tenant.
+- Added a persistent tenant registry (`orbita_tenants.db`) mapping authenticated subject to Guided UI username, with
+  an append-only binding audit trail.
+- Resolution fails closed: an unbound or unauthenticated identity is refused and never served a default tenant.
+- Added `orbita-agent tenants` (`bind`, `unbind`, `list`, `identities`, `events`). Binding is operator-only and is
+  deliberately not exposed as an MCP tool, so no caller can grant itself a tenant.
+- Refused, by default, to bind two subjects to one tenant or to silently rebind a subject.
+- Recorded the GitHub login for each allowlisted identity at sign-in so operators can bind by login instead of by
+  numeric subject.
+- Added `orbita_genome_whoami`, and made `orbita_genome_status` report tenancy state instead of failing when the
+  caller has no tenant.
+- Replaced the "exactly one allowed GitHub user" startup interlock: multiple users are now permitted once every
+  identity is bound, and refused while no bindings exist.
+- Preserved existing single-owner deployments: one allowed GitHub user plus `ORBITA_DISCOVERY_GENOME_USERNAME`
+  auto-binds on first sign-in, and that fallback disengages when a second user is allowed.
+
 ## 0.3.0 — 2026-07-16
 
 - Added a persistent, versioned registry for the active research policy and every improvement proposal.

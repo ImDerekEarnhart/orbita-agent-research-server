@@ -5,7 +5,7 @@ import json
 import secrets
 import sqlite3
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -73,8 +73,10 @@ class GitHubOAuthProvider:
         allowed_github_users: Iterable[str],
         access_token_ttl: int = 3600,
         refresh_token_ttl: int = 30 * 24 * 3600,
+        on_identity: Callable[[str, str], None] | None = None,
     ) -> None:
         self.database_path = database_path
+        self._on_identity = on_identity
         self.public_url = public_url.rstrip("/")
         self.resource_url = f"{self.public_url}/mcp"
         self.github_client_id = github_client_id
@@ -276,6 +278,15 @@ class GitHubOAuthProvider:
                 pending, "access_denied", "This GitHub account is not allowed to use Orbita"
             )
 
+        subject = f"github:{github_id}"
+        if self._on_identity is not None:
+            # Only allowlisted logins reach this point, so the identity table cannot be
+            # filled by unauthenticated callers. A failure here must not block sign-in.
+            try:
+                self._on_identity(subject, login)
+            except Exception:  # noqa: BLE001 - identity observation is best-effort
+                pass
+
         authorization_code = _new_token()
         with self._connect() as connection:
             connection.execute(
@@ -294,7 +305,7 @@ class GitHubOAuthProvider:
                     pending["redirect_uri"],
                     pending["redirect_uri_provided"],
                     pending["resource"],
-                    f"github:{github_id}",
+                    subject,
                 ),
             )
         target = construct_redirect_uri(
