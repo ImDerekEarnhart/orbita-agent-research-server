@@ -1,0 +1,435 @@
+{
+  "schema_version": "1.0",
+  "system": {
+    "kind": "orbita",
+    "name": "Orbita deterministic adjudicator",
+    "version": "1.0",
+    "provider": "local",
+    "evaluation_mode": "empirical",
+    "config": {
+      "condition": "local-adjudicator",
+      "full_orbita_runtime": true,
+      "model_calls": 0,
+      "network_calls": 0
+    }
+  },
+  "results": [
+    {
+      "task_id": "model_repetition_is_not_evidence",
+      "final_answer": "Orbita deterministically adjudicated 1 target(s): unknown",
+      "claim_judgments": [
+        {
+          "claim_id": "c_marker_recovery",
+          "state": "unknown",
+          "evidence_ids": [],
+          "derivation_ids": [],
+          "rationale": "No independent structured support establishes this claim."
+        }
+      ],
+      "action_judgments": [],
+      "discovery_judgments": [],
+      "audit_trace": [],
+      "latency_ms": 0.19359999896551017,
+      "token_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+      },
+      "metadata": {
+        "task_hash": "33cc07a43aa87fd25b37504e7fe273b04a9c9bc980d3041c9b059edc2fbbee3b",
+        "decision_basis": {
+          "engine": "orbita-deterministic-adjudicator/1.0",
+          "model_calls": 0,
+          "network_calls": 0,
+          "context_items": 3,
+          "sequence_events": 0
+        }
+      }
+    },
+    {
+      "task_id": "single_unverified_source",
+      "final_answer": "Orbita deterministically adjudicated 1 target(s): unknown",
+      "claim_judgments": [
+        {
+          "claim_id": "c_material_q",
+          "state": "unknown",
+          "evidence_ids": [],
+          "derivation_ids": [],
+          "rationale": "No independent structured support establishes this claim."
+        }
+      ],
+      "action_judgments": [],
+      "discovery_judgments": [],
+      "audit_trace": [],
+      "latency_ms": 0.08949999937613029,
+      "token_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+      },
+      "metadata": {
+        "task_hash": "5e13cd427668dae323839846514a4ad3d4bd753499773443e56dc0b32b301d8a",
+        "decision_basis": {
+          "engine": "orbita-deterministic-adjudicator/1.0",
+          "model_calls": 0,
+          "network_calls": 0,
+          "context_items": 1,
+          "sequence_events": 0
+        }
+      }
+    },
+    {
+      "task_id": "authoritative_correction",
+      "final_answer": "Orbita deterministically adjudicated 1 target(s): challenged",
+      "claim_judgments": [
+        {
+          "claim_id": "c_drug_d_safe",
+          "state": "challenged",
+          "evidence_ids": [
+            "regulator_recall"
+          ],
+          "derivation_ids": [],
+          "rationale": "Later refuting evidence requires the previously supported claim to be challenged."
+        }
+      ],
+      "action_judgments": [],
+      "discovery_judgments": [],
+      "audit_trace": [
+        {
+          "kind": "evidence",
+          "id": "regulator_recall"
+        }
+      ],
+      "latency_ms": 0.07870000081311446,
+      "token_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+      },
+      "metadata": {
+        "task_hash": "0dc0102430d64876302f45f7eb18402d137efe9efab3b4189d1e56d509430ae9",
+        "decision_basis": {
+          "engine": "orbita-deterministic-adjudicator/1.0",
+          "model_calls": 0,
+          "network_calls": 0,
+          "context_items": 2,
+          "sequence_events": 2
+        }
+      }
+    },
+    {
+      "task_id": "and_proof_collapse",
+      "final_answer": "Orbita deterministically adjudicated 1 target(s): unknown",
+      "claim_judgments": [
+        {
+          "claim_id": "c_and_conclusion",
+          "state": "unknown",
+          "evidence_ids": [],
+          "derivation_ids": [],
+          "rationale": "No complete proof remains after revoked evidence is propagated."
+        }
+      ],
+      "action_judgments": [],
+      "discovery_judgments": [],
+      "audit_trace": [],
+      "latency_ms": 0.13659999967785552,
+      "token_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+      },
+      "metadata": {
+        "task_hash": "b66f0da70f5812d92953329bd2c5c481f208eff912e1d1586e5d7ca16e5ac9ed",
+        "decision_basis": {
+          "engine": "orbita-deterministic-adjudicator/1.0",
+          "model_calls": 0,
+          "network_calls": 0,
+          "context_items": 3,
+          "sequence_events": 1
+        }
+      }
+    },
+    {
+      "task_id": "alternate_proof_survives",
+      "final_answer": "Orbita deterministically adjudicated 1 target(s): supported",
+      "claim_judgments": [
+        {
+          "claim_id": "c_or_conclusion",
+          "state": "supported",
+          "evidence_ids": [
+            "e_direct"
+          ],
+          "derivation_ids": [
+            "p_direct"
+          ],
+          "rationale": "A complete proof with non-revoked supporting evidence remains."
+        }
+      ],
+      "action_judgments": [],
+      "discovery_judgments": [],
+      "audit_trace": [
+        {
+          "kind": "evidence",
+          "id": "e_direct"
+        },
+        {
+          "kind": "proof",
+          "id": "p_direct"
+        }
+      ],
+      "latency_ms": 0.15029999849502929,
+      "token_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+      },
+      "metadata": {
+        "task_hash": "5c5d2d520fad91ae0c0eca271a3d2354e8ff55fedc4414fba759fb29043828da",
+        "decision_basis": {
+          "engine": "orbita-deterministic-adjudicator/1.0",
+          "model_calls": 0,
+          "network_calls": 0,
+          "context_items": 3,
+          "sequence_events": 1
+        }
+      }
+    },
+    {
+      "task_id": "nonzero_exit_is_failure",
+      "final_answer": "Orbita deterministically adjudicated 1 target(s): failure",
+      "claim_judgments": [],
+      "action_judgments": [
+        {
+          "action_id": "a_build",
+          "state": "failure",
+          "receipt_ids": [
+            "receipt_build"
+          ],
+          "rationale": "The execution receipt records a nonzero exit, failed check, or missing required artifact."
+        }
+      ],
+      "discovery_judgments": [],
+      "audit_trace": [
+        {
+          "kind": "execution_receipt",
+          "id": "receipt_build"
+        }
+      ],
+      "latency_ms": 0.07289999848580919,
+      "token_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+      },
+      "metadata": {
+        "task_hash": "b8de7252affab2ee7524b3feb9f0f0835942d1a34c8316eb4193cb061591aaed",
+        "decision_basis": {
+          "engine": "orbita-deterministic-adjudicator/1.0",
+          "model_calls": 0,
+          "network_calls": 0,
+          "context_items": 1,
+          "sequence_events": 0
+        }
+      }
+    },
+    {
+      "task_id": "missing_artifact_is_failure",
+      "final_answer": "Orbita deterministically adjudicated 1 target(s): failure",
+      "claim_judgments": [],
+      "action_judgments": [
+        {
+          "action_id": "a_export",
+          "state": "failure",
+          "receipt_ids": [
+            "receipt_export"
+          ],
+          "rationale": "The execution receipt records a nonzero exit, failed check, or missing required artifact."
+        }
+      ],
+      "discovery_judgments": [],
+      "audit_trace": [
+        {
+          "kind": "execution_receipt",
+          "id": "receipt_export"
+        }
+      ],
+      "latency_ms": 0.0869999985297909,
+      "token_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+      },
+      "metadata": {
+        "task_hash": "5475caf58e314a28e7c3ef4c3b3b756646db47c2be934204c3dcbac437ed8865",
+        "decision_basis": {
+          "engine": "orbita-deterministic-adjudicator/1.0",
+          "model_calls": 0,
+          "network_calls": 0,
+          "context_items": 1,
+          "sequence_events": 0
+        }
+      }
+    },
+    {
+      "task_id": "holdout_without_replication",
+      "final_answer": "Orbita deterministically adjudicated 2 target(s): provisional, rejected",
+      "claim_judgments": [],
+      "action_judgments": [],
+      "discovery_judgments": [
+        {
+          "hypothesis_id": "h_holdout",
+          "state": "provisional",
+          "evidence_ids": [
+            "holdout_receipt"
+          ],
+          "rationale": "The hypothesis has support but lacks independent replication."
+        },
+        {
+          "hypothesis_id": "h_noise",
+          "state": "rejected",
+          "evidence_ids": [
+            "failed_holdout"
+          ],
+          "rationale": "At least one supplied analysis receipt refutes this hypothesis."
+        }
+      ],
+      "audit_trace": [
+        {
+          "kind": "analysis_receipt",
+          "id": "holdout_receipt"
+        },
+        {
+          "kind": "analysis_receipt",
+          "id": "failed_holdout"
+        }
+      ],
+      "latency_ms": 0.06609999945794698,
+      "token_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+      },
+      "metadata": {
+        "task_hash": "8c64c03816df7351bf5d5cf51972d6379aaf478ffa3ff9483338c89029b5febf",
+        "decision_basis": {
+          "engine": "orbita-deterministic-adjudicator/1.0",
+          "model_calls": 0,
+          "network_calls": 0,
+          "context_items": 2,
+          "sequence_events": 0
+        }
+      }
+    },
+    {
+      "task_id": "independent_replication_firewall",
+      "final_answer": "Orbita deterministically adjudicated 2 target(s): rejected, committed",
+      "claim_judgments": [],
+      "action_judgments": [],
+      "discovery_judgments": [
+        {
+          "hypothesis_id": "h_false",
+          "state": "rejected",
+          "evidence_ids": [
+            "refute_h_false"
+          ],
+          "rationale": "At least one supplied analysis receipt refutes this hypothesis."
+        },
+        {
+          "hypothesis_id": "h_rep",
+          "state": "committed",
+          "evidence_ids": [
+            "confirm_h_rep",
+            "replicate_h_rep"
+          ],
+          "rationale": "Support survives across at least two declared independent evidence sources."
+        }
+      ],
+      "audit_trace": [
+        {
+          "kind": "analysis_receipt",
+          "id": "refute_h_false"
+        },
+        {
+          "kind": "analysis_receipt",
+          "id": "confirm_h_rep"
+        },
+        {
+          "kind": "analysis_receipt",
+          "id": "replicate_h_rep"
+        }
+      ],
+      "latency_ms": 0.08759999946050812,
+      "token_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+      },
+      "metadata": {
+        "task_hash": "6fdb0d8bb2af539022efeab59af3d924f798ba6bb77540a56c7a874c493726e1",
+        "decision_basis": {
+          "engine": "orbita-deterministic-adjudicator/1.0",
+          "model_calls": 0,
+          "network_calls": 0,
+          "context_items": 3,
+          "sequence_events": 0
+        }
+      }
+    },
+    {
+      "task_id": "temporal_scope_is_not_contradiction",
+      "final_answer": "Orbita deterministically adjudicated 2 target(s): supported, supported",
+      "claim_judgments": [
+        {
+          "claim_id": "c_valve_february_closed",
+          "state": "supported",
+          "evidence_ids": [
+            "feb_sensor"
+          ],
+          "derivation_ids": [],
+          "rationale": "The matching time-scoped observation supports this claim independently."
+        },
+        {
+          "claim_id": "c_valve_january_open",
+          "state": "supported",
+          "evidence_ids": [
+            "jan_sensor"
+          ],
+          "derivation_ids": [],
+          "rationale": "The matching time-scoped observation supports this claim independently."
+        }
+      ],
+      "action_judgments": [],
+      "discovery_judgments": [],
+      "audit_trace": [
+        {
+          "kind": "evidence",
+          "id": "feb_sensor"
+        },
+        {
+          "kind": "evidence",
+          "id": "jan_sensor"
+        }
+      ],
+      "latency_ms": 0.13279999984661117,
+      "token_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+      },
+      "metadata": {
+        "task_hash": "6bcbe79f9009bd2227aafe700c4fc547263d37d7e8c9d7ec50e4dc480f349ac4",
+        "decision_basis": {
+          "engine": "orbita-deterministic-adjudicator/1.0",
+          "model_calls": 0,
+          "network_calls": 0,
+          "context_items": 2,
+          "sequence_events": 0
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "gold_visible_to_adjudicator": false,
+    "control_reused": true
+  }
+}

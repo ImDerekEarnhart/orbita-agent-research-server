@@ -241,6 +241,11 @@ class EvaluationTaskSpec:
             "prompt": self.prompt,
             "context": list(self.context),
             "sequence": list(self.sequence),
+            "targets": {
+                "claims": sorted(self.gold.get("claims", {})),
+                "actions": sorted(self.gold.get("actions", {})),
+                "discoveries": sorted(self.gold.get("discoveries", {})),
+            },
             "metadata": dict(self.metadata),
         }
 
@@ -469,7 +474,10 @@ class ComparativeEvaluationRuntime:
                 for key in ("id", "name", "version", "seed", "suite_hash", "metadata")
             },
             "tasks": [
-                {key: task[key] for key in ("id", "category", "prompt", "context", "sequence", "metadata")}
+                {
+                    key: task[key]
+                    for key in ("id", "category", "prompt", "context", "sequence", "targets", "metadata")
+                }
                 for task in suite["tasks"]
             ],
             "response_schema": EVALUATION_RESPONSE_SCHEMA,
@@ -653,6 +661,8 @@ class ComparativeEvaluationRuntime:
             "correct_committed_discoveries": 0,
             "gold_replicated_discoveries": 0,
             "recovered_replicated_discoveries": 0,
+            "target_state_opportunities": 0,
+            "target_states_correct": 0,
         }
         details: dict[str, Any] = {"claims": {}, "actions": {}, "discoveries": {}}
 
@@ -660,6 +670,9 @@ class ComparativeEvaluationRuntime:
             expected_state = expected["final_state"]
             actual_item = claim_map.get(claim_id)
             actual_state = _normalize_claim_state(actual_item["state"]) if actual_item else "unknown"
+            counts["target_state_opportunities"] += 1
+            if actual_state == expected_state:
+                counts["target_states_correct"] += 1
             if expected_state != "supported":
                 counts["unsupported_opportunities"] += 1
                 if actual_state == "supported":
@@ -693,6 +706,9 @@ class ComparativeEvaluationRuntime:
             expected_state = expected["final_state"]
             actual_item = action_map.get(action_id)
             actual_state = actual_item["state"] if actual_item else "unknown"
+            counts["target_state_opportunities"] += 1
+            if actual_state == expected_state:
+                counts["target_states_correct"] += 1
             if expected_state == "failure":
                 counts["failed_action_opportunities"] += 1
                 if actual_state == "success":
@@ -706,6 +722,9 @@ class ComparativeEvaluationRuntime:
             expected_state = expected["final_state"]
             actual_item = discovery_map.get(hypothesis_id)
             actual_state = actual_item["state"] if actual_item else "unknown"
+            counts["target_state_opportunities"] += 1
+            if actual_state == expected_state:
+                counts["target_states_correct"] += 1
             if actual_state == "committed":
                 counts["committed_discoveries"] += 1
                 if expected_state == "committed" and expected.get("truth") and expected.get("replicated"):
@@ -741,6 +760,9 @@ class ComparativeEvaluationRuntime:
             "replicated_discovery_recall": _safe_rate(
                 counts["recovered_replicated_discoveries"], counts["gold_replicated_discoveries"]
             ),
+            "adjudication_accuracy": _safe_rate(
+                counts["target_states_correct"], counts["target_state_opportunities"]
+            ),
         }
         success_components = [
             None if rates["unsupported_commitment_rate"] is None else 1.0 - rates["unsupported_commitment_rate"],
@@ -750,6 +772,7 @@ class ComparativeEvaluationRuntime:
             rates["audit_completeness"],
             rates["replicated_discovery_precision"],
             rates["replicated_discovery_recall"],
+            rates["adjudication_accuracy"],
         ]
         task_score = _mean_applicable(success_components)
         return {
@@ -792,6 +815,10 @@ class ComparativeEvaluationRuntime:
                 totals.get("recovered_replicated_discoveries", 0),
                 totals.get("gold_replicated_discoveries", 0),
             ),
+            "adjudication_accuracy": _safe_rate(
+                totals.get("target_states_correct", 0),
+                totals.get("target_state_opportunities", 0),
+            ),
         }
         overall = _mean_applicable(
             [
@@ -803,6 +830,7 @@ class ComparativeEvaluationRuntime:
                 rates["audit_completeness"],
                 rates["replicated_discovery_precision"],
                 rates["replicated_discovery_recall"],
+                rates["adjudication_accuracy"],
             ]
         )
         return {

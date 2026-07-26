@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from starlette.testclient import TestClient
 
+from orbita.evaluation import default_adversarial_suite
 from orbita_agent import __version__
 from orbita_agent.mcp_server import StaticBearerTokenVerifier, _case_metadata, build_mcp_server
 
@@ -27,6 +28,9 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
         "orbita_capabilities",
         "orbita_create_case",
         "orbita_add_inline_file",
+        "orbita_adjudicate_epistemic_task",
+        "orbita_compress_epistemic_task",
+        "orbita_compress_code_context",
         "orbita_compile_plan",
         "orbita_approve_plan",
         "orbita_run_discovery",
@@ -49,6 +53,12 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
     }
     assert expected <= tools.keys()
     assert tools["orbita_capabilities"].annotations.readOnlyHint is True
+    assert tools["orbita_adjudicate_epistemic_task"].annotations.readOnlyHint is True
+    assert tools["orbita_adjudicate_epistemic_task"].annotations.destructiveHint is False
+    assert tools["orbita_compress_epistemic_task"].annotations.readOnlyHint is True
+    assert tools["orbita_compress_epistemic_task"].annotations.destructiveHint is False
+    assert tools["orbita_compress_code_context"].annotations.readOnlyHint is True
+    assert tools["orbita_compress_code_context"].annotations.destructiveHint is False
     assert tools["orbita_approve_plan"].annotations.destructiveHint is True
     assert tools["orbita_run_discovery"].annotations.destructiveHint is True
     assert tools["orbita_promote_improvement"].annotations.destructiveHint is True
@@ -74,6 +84,74 @@ def test_mcp_schemas_are_machine_usable(gateway):
     assert graph["properties"]["edges"]["type"] == "array"
     genome_hash = tools["orbita_genome_hash_result"].parameters
     assert set(genome_hash["required"]) == {"tournament_id", "entry_id", "verdict", "result"}
+    adjudication = tools["orbita_adjudicate_epistemic_task"].parameters
+    assert set(adjudication["required"]) == {"task"}
+    assert adjudication["properties"]["task"]["type"] == "object"
+    compression = tools["orbita_compress_epistemic_task"].parameters
+    assert set(compression["required"]) == {"task"}
+    assert compression["properties"]["max_context_items"]["default"] == 8
+    code_compression = tools["orbita_compress_code_context"].parameters
+    assert set(code_compression["required"]) == {"issue", "files"}
+    assert code_compression["properties"]["max_files"]["default"] == 6
+
+
+def test_adjudication_tool_executes_through_the_real_mcp_surface(gateway):
+    mcp, _ = build_mcp_server(gateway=gateway)
+    task = default_adversarial_suite().tasks[0].public_dict()
+
+    _content, structured = asyncio.run(mcp.call_tool("orbita_adjudicate_epistemic_task", {"task": task}))
+
+    assert structured["task_id"] == "model_repetition_is_not_evidence"
+    assert structured["claim_judgments"][0]["state"] == "unknown"
+    assert structured["decision_basis"]["model_calls"] == 0
+    assert structured["decision_basis"]["network_calls"] == 0
+
+
+def test_compression_tool_executes_through_the_real_mcp_surface(gateway):
+    mcp, _ = build_mcp_server(gateway=gateway)
+    task = default_adversarial_suite().tasks[0].public_dict()
+    task["context"].append(
+        {"id": "irrelevant_weather", "kind": "narrative_record", "text": "It rained elsewhere."}
+    )
+
+    _content, structured = asyncio.run(
+        mcp.call_tool(
+            "orbita_compress_epistemic_task",
+            {"task": task, "max_context_items": 3},
+        )
+    )
+
+    assert structured["receipt"]["model_calls"] == 0
+    assert structured["receipt"]["network_calls"] == 0
+    assert "irrelevant_weather" in structured["receipt"]["dropped_ids"]
+
+
+def test_code_compression_tool_executes_through_the_real_mcp_surface(gateway):
+    mcp, _ = build_mcp_server(gateway=gateway)
+    files = [
+        {
+            "path": "retry_logic.py",
+            "content": "def run_with_retries(operation):\n    return operation()\n",
+        },
+        {
+            "path": "weather.py",
+            "content": "def rainfall_total(values):\n    return sum(values)\n",
+        },
+    ]
+
+    _content, structured = asyncio.run(
+        mcp.call_tool(
+            "orbita_compress_code_context",
+            {
+                "issue": "run_with_retries fails to retry an operation",
+                "files": files,
+                "max_files": 1,
+            },
+        )
+    )
+
+    assert structured["receipt"]["retained_paths"] == ["retry_logic.py"]
+    assert structured["receipt"]["model_calls"] == 0
 
 
 def test_static_bearer_token_verifier():

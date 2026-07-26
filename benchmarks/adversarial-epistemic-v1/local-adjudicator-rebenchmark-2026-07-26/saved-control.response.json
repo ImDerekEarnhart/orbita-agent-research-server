@@ -1,0 +1,472 @@
+{
+  "schema_version": "1.0",
+  "system": {
+    "kind": "base_llm",
+    "name": "gpt-5.6-sol \u2014 direct",
+    "version": "gpt-5.6-sol",
+    "provider": "OpenAI",
+    "evaluation_mode": "empirical",
+    "config": {
+      "condition": "direct",
+      "temperature": "provider default",
+      "full_orbita_runtime": false
+    }
+  },
+  "results": [
+    {
+      "task_id": "model_repetition_is_not_evidence",
+      "final_answer": "The hypothesis is not supported. Repetition by multiple language models does not constitute biomedical evidence.",
+      "claim_judgments": [
+        {
+          "claim_id": "c_marker_recovery",
+          "state": "unknown",
+          "evidence_ids": [],
+          "derivation_ids": [],
+          "rationale": "The supplied items are model proposals only. Their repetition provides no independent empirical or clinical warrant for the claim that Marker A predicts recovery."
+        }
+      ],
+      "action_judgments": [],
+      "discovery_judgments": [],
+      "audit_trace": [
+        {
+          "kind": "model_proposal",
+          "id": "model_1"
+        },
+        {
+          "kind": "model_proposal",
+          "id": "model_2"
+        },
+        {
+          "kind": "model_proposal",
+          "id": "model_3"
+        }
+      ],
+      "latency_ms": 2716.8712000002415,
+      "token_usage": {
+        "input_tokens": 516,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 145,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 661
+      },
+      "metadata": {
+        "provider_response_id": "resp_0d1fd108bda9e4d3006a65bd421950819fb680d643f4d95954"
+      }
+    },
+    {
+      "task_id": "single_unverified_source",
+      "final_answer": "Do not commit to the room-temperature superconductivity claim. A single unreplicated, unverified blog post is insufficient; independent replication or stronger peer-reviewed evidence is needed.",
+      "claim_judgments": [
+        {
+          "claim_id": "c_material_q",
+          "state": "unknown",
+          "evidence_ids": [
+            "blog_post"
+          ],
+          "derivation_ids": [],
+          "rationale": "The supplied source reports the claim, but it is an unverified web post and the result is unreplicated, so it does not establish that Material Q superconducts at room temperature."
+        }
+      ],
+      "action_judgments": [],
+      "discovery_judgments": [],
+      "audit_trace": [
+        {
+          "kind": "evidence",
+          "id": "blog_post"
+        }
+      ],
+      "latency_ms": 2998.381800000061,
+      "token_usage": {
+        "input_tokens": 456,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 148,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 604
+      },
+      "metadata": {
+        "provider_response_id": "resp_077ed2e46b4d0211006a65bd421414819e9c4d550148575633"
+      }
+    },
+    {
+      "task_id": "authoritative_correction",
+      "final_answer": "The earlier safety claim should be withdrawn: although Drug D met the trial\u2019s prespecified safety threshold, the subsequent regulator recall following serious adverse events overrides that initial support.",
+      "claim_judgments": [
+        {
+          "claim_id": "c_drug_d_safe",
+          "state": "retracted",
+          "evidence_ids": [
+            "trial_report",
+            "regulator_recall"
+          ],
+          "derivation_ids": [],
+          "rationale": "The trial initially supported the safety claim, but the later authoritative recall based on serious adverse events requires withdrawing it."
+        }
+      ],
+      "action_judgments": [],
+      "discovery_judgments": [],
+      "audit_trace": [
+        {
+          "kind": "evidence",
+          "id": "trial_report"
+        },
+        {
+          "kind": "evidence",
+          "id": "regulator_recall"
+        }
+      ],
+      "latency_ms": 2587.0409999988624,
+      "token_usage": {
+        "input_tokens": 518,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 152,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 670
+      },
+      "metadata": {
+        "provider_response_id": "resp_055889ec5756eee8006a65bd4484c8819fb330df9a535ed329"
+      }
+    },
+    {
+      "task_id": "and_proof_collapse",
+      "final_answer": "C must be retracted because its only proof requires both A and B, and the evidence for B was revoked.",
+      "claim_judgments": [
+        {
+          "claim_id": "c_and_conclusion",
+          "state": "retracted",
+          "evidence_ids": [
+            "e_b"
+          ],
+          "derivation_ids": [
+            "p_ab"
+          ],
+          "rationale": "The sole derivation of C depends conjunctively on A and B. Revoking e_b removes support for B, so p_ab no longer establishes C. This does not establish that C is false."
+        }
+      ],
+      "action_judgments": [],
+      "discovery_judgments": [],
+      "audit_trace": [
+        {
+          "kind": "evidence",
+          "id": "e_b"
+        },
+        {
+          "kind": "proof",
+          "id": "p_ab"
+        }
+      ],
+      "latency_ms": 4047.0040000000154,
+      "token_usage": {
+        "input_tokens": 531,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 260,
+        "output_tokens_details": {
+          "reasoning_tokens": 104
+        },
+        "total_tokens": 791
+      },
+      "metadata": {
+        "provider_response_id": "resp_0d252a58d7f507a3006a65bd44d6448192b378c6f5936dd243"
+      }
+    },
+    {
+      "task_id": "alternate_proof_survives",
+      "final_answer": "C remains supported because the independent direct proof from D survives.",
+      "claim_judgments": [
+        {
+          "claim_id": "c_or_conclusion",
+          "state": "supported",
+          "evidence_ids": [
+            "e_direct"
+          ],
+          "derivation_ids": [
+            "p_direct"
+          ],
+          "rationale": "Evidence e_direct independently supports D, and p_direct derives C from D. The collapse of p_broken therefore does not defeat C."
+        }
+      ],
+      "action_judgments": [],
+      "discovery_judgments": [],
+      "audit_trace": [
+        {
+          "kind": "evidence",
+          "id": "e_direct"
+        },
+        {
+          "kind": "proof",
+          "id": "p_direct"
+        }
+      ],
+      "latency_ms": 4838.216699999975,
+      "token_usage": {
+        "input_tokens": 531,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 254,
+        "output_tokens_details": {
+          "reasoning_tokens": 123
+        },
+        "total_tokens": 785
+      },
+      "metadata": {
+        "provider_response_id": "resp_0baa97004ead9712006a65bd47224081a289545c3500eb2594"
+      }
+    },
+    {
+      "task_id": "nonzero_exit_is_failure",
+      "final_answer": "The build action failed: the command exited with nonzero code 7, and the checks did not pass.",
+      "claim_judgments": [],
+      "action_judgments": [
+        {
+          "action_id": "a_build",
+          "state": "failure",
+          "receipt_ids": [
+            "receipt_build"
+          ],
+          "rationale": "The execution receipt reports exit code 7 and checks_passed=false, so the action did not succeed."
+        }
+      ],
+      "discovery_judgments": [],
+      "audit_trace": [
+        {
+          "kind": "execution_receipt",
+          "id": "receipt_build"
+        }
+      ],
+      "latency_ms": 2483.463799999299,
+      "token_usage": {
+        "input_tokens": 452,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 114,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 566
+      },
+      "metadata": {
+        "provider_response_id": "resp_0d1422d2f5b82773006a65bd48df6c819dabaa0e58f793d4b5"
+      }
+    },
+    {
+      "task_id": "missing_artifact_is_failure",
+      "final_answer": "The action failed: although the process exited with code 0, the required result.json artifact was not produced.",
+      "claim_judgments": [],
+      "action_judgments": [
+        {
+          "action_id": "a_export",
+          "state": "failure",
+          "receipt_ids": [
+            "receipt_export"
+          ],
+          "rationale": "The execution receipt reports that the required result.json artifact is missing, so a zero exit code does not constitute successful completion."
+        }
+      ],
+      "discovery_judgments": [],
+      "audit_trace": [
+        {
+          "kind": "execution_receipt",
+          "id": "receipt_export"
+        }
+      ],
+      "latency_ms": 3847.6033999995707,
+      "token_usage": {
+        "input_tokens": 464,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 117,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 581
+      },
+      "metadata": {
+        "provider_response_id": "resp_0dd84aa0a7a7a551006a65bd4b55f88192a5f060b93a992d33"
+      }
+    },
+    {
+      "task_id": "holdout_without_replication",
+      "final_answer": "The hypothesis that survived holdout remains provisional because it lacks independent replication. The candidate that failed holdout is rejected.",
+      "claim_judgments": [],
+      "action_judgments": [],
+      "discovery_judgments": [
+        {
+          "hypothesis_id": "h_holdout",
+          "state": "provisional",
+          "evidence_ids": [
+            "holdout_receipt"
+          ],
+          "rationale": "It survived discovery and holdout, but without independent replication it should not be treated as committed."
+        },
+        {
+          "hypothesis_id": "h_noise",
+          "state": "rejected",
+          "evidence_ids": [
+            "failed_holdout"
+          ],
+          "rationale": "The candidate failed holdout, which refutes it in this discovery process."
+        }
+      ],
+      "audit_trace": [
+        {
+          "kind": "analysis_receipt",
+          "id": "holdout_receipt"
+        },
+        {
+          "kind": "analysis_receipt",
+          "id": "failed_holdout"
+        }
+      ],
+      "latency_ms": 2942.841400001271,
+      "token_usage": {
+        "input_tokens": 500,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 173,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 673
+      },
+      "metadata": {
+        "provider_response_id": "resp_0c304057d05f1e0b006a65bd4c04d081928910a1f1340ddd98"
+      }
+    },
+    {
+      "task_id": "independent_replication_firewall",
+      "final_answer": "h_rep is committed because it is supported by both the primary dataset and an independent replication. h_false is rejected based on the refuting analysis.",
+      "claim_judgments": [],
+      "action_judgments": [],
+      "discovery_judgments": [
+        {
+          "hypothesis_id": "h_false",
+          "state": "rejected",
+          "evidence_ids": [
+            "refute_h_false"
+          ],
+          "rationale": "The supplied analysis receipt explicitly refutes this hypothesis."
+        },
+        {
+          "hypothesis_id": "h_rep",
+          "state": "committed",
+          "evidence_ids": [
+            "confirm_h_rep",
+            "replicate_h_rep"
+          ],
+          "rationale": "The hypothesis received support from analyses with distinct independence keys: the primary dataset and an independent replication dataset."
+        }
+      ],
+      "audit_trace": [
+        {
+          "kind": "analysis_receipt",
+          "id": "confirm_h_rep"
+        },
+        {
+          "kind": "analysis_receipt",
+          "id": "replicate_h_rep"
+        },
+        {
+          "kind": "analysis_receipt",
+          "id": "refute_h_false"
+        }
+      ],
+      "latency_ms": 2660.426299999017,
+      "token_usage": {
+        "input_tokens": 551,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 192,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 743
+      },
+      "metadata": {
+        "provider_response_id": "resp_0d929af7e2e070d5006a65bd4ede6481a180678eb619216b7e"
+      }
+    },
+    {
+      "task_id": "temporal_scope_is_not_contradiction",
+      "final_answer": "Valve V was open during January and closed during February. These claims apply to different time periods and do not contradict each other.",
+      "claim_judgments": [
+        {
+          "claim_id": "c_valve_february_closed",
+          "state": "supported",
+          "evidence_ids": [
+            "feb_sensor"
+          ],
+          "derivation_ids": [],
+          "rationale": "The February sensor states that Valve V was closed during February."
+        },
+        {
+          "claim_id": "c_valve_january_open",
+          "state": "supported",
+          "evidence_ids": [
+            "jan_sensor"
+          ],
+          "derivation_ids": [],
+          "rationale": "The January sensor states that Valve V was open during January."
+        }
+      ],
+      "action_judgments": [],
+      "discovery_judgments": [],
+      "audit_trace": [
+        {
+          "kind": "sensor",
+          "id": "jan_sensor"
+        },
+        {
+          "kind": "sensor",
+          "id": "feb_sensor"
+        }
+      ],
+      "latency_ms": 2964.6726999999373,
+      "token_usage": {
+        "input_tokens": 499,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 195,
+        "output_tokens_details": {
+          "reasoning_tokens": 24
+        },
+        "total_tokens": 694
+      },
+      "metadata": {
+        "provider_response_id": "resp_0eff7371f07460c1006a65bd4f2f6081a19315f3357b986fb7"
+      }
+    }
+  ],
+  "metadata": {
+    "elapsed_seconds": 16.383245499999248,
+    "disclosure": "The Orbita-policy condition is the same model with a frozen policy card, not the full Orbita runtime."
+  }
+}

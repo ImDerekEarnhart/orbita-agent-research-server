@@ -5,7 +5,7 @@ import shutil
 import threading
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import pandas as pd
 
@@ -18,6 +18,7 @@ from .improvement import PROMOTION_PHRASE, ROLLBACK_PHRASE, ImprovementLab
 from .knowledge import KnowledgeStore
 from .archive_policy import ArchivePolicy
 from .memory_index import MemoryIndex, chat_export_members
+from .object_store import build_object_store, object_key
 from .reversals import find_candidate_reversals
 
 APPROVAL_PHRASE = "I reviewed this exact frozen plan"
@@ -47,6 +48,7 @@ class AgentGateway:
         self.knowledge = KnowledgeStore(self.config.knowledge_db)
         self.improvements = ImprovementLab(self.config.improvement_db, self.service)
         self.memory = MemoryIndex(self.config.memory_db)
+        self.objects = build_object_store(self.config.home / "objects")
         self._lock = threading.RLock()
         self._children: list[AgentGateway] = []
 
@@ -248,7 +250,73 @@ class AgentGateway:
             raise ValueError("pass a case_id, or everything=True to clear the whole index")
         return {"scope": case_id, "messages_deleted": self.memory.delete_case(case_id)}
 
-    def ingest_upload(self, *, case_id: str, path: Path) -> dict[str, Any]:
+    def receive_upload(
+        self,
+        *,
+        case_id: str,
+        filename: str,
+        chunks: Iterator[bytes],
+        max_bytes: int,
+    ) -> dict[str, Any]:
+        """Stream an upload into object storage, then ingest it from there.
+
+        The durable copy goes to object storage first, so the archive survives even if
+        parsing fails and can be re-parsed later without asking the user to upload a
+        gigabyte again. The volume only ever sees a working copy, which is removed once
+        the parsed artifacts exist.
+
+        This is what keeps a fixed-size volume from being the limit on how many people
+        can use the service.
+        """
+        with self._lock:
+            self.service.store.get_case(case_id)
+
+        file_id = f"upl_{uuid.uuid4().hex}"
+        key = object_key(self.config.tenant, case_id, file_id, filename)
+        stored = self.objects.put_stream(key, chunks, max_bytes=max_bytes)
+        if stored.size_bytes == 0:
+            self.objects.delete(key)
+            raise ValueError("upload was empty")
+
+        staging = self.config.inbox / f"upload_{uuid.uuid4().hex}"
+        staging.mkdir(parents=True, exist_ok=True)
+        working = staging / Path(key).name
+        try:
+            with self.objects.open(key) as source, working.open("wb") as sink:
+                shutil.copyfileobj(source, sink, length=1024 * 1024)
+            record = self.ingest_upload(case_id=case_id, path=working, object_key=key)
+        except BaseException:
+            # A failed ingest must not leave an orphan in the store that nothing
+            # references and nobody is accounting for.
+            self.objects.delete(key)
+            raise
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+        self._prune_volume_original(record)
+        return record | {"object": stored.public()}
+
+    def _prune_volume_original(self, record: dict[str, Any]) -> None:
+        """Drop the volume's copy of the raw upload once a durable copy exists elsewhere.
+
+        The extracted and normalized artifacts stay, because those are what the case and
+        the search index read. The original is reachable from object storage, so keeping
+        a second copy on a fixed-size disk buys nothing and is the thing that fills it.
+        """
+        if not record.get("object_key"):
+            return
+        stored_path = record.get("stored_path")
+        if not stored_path:
+            return
+        candidate = Path(stored_path).resolve()
+        workspace = self.config.workspace.resolve()
+        if workspace in candidate.parents and candidate.is_file():
+            candidate.unlink(missing_ok=True)
+            record["volume_original_pruned"] = True
+
+    def ingest_upload(
+        self, *, case_id: str, path: Path, object_key: str | None = None
+    ) -> dict[str, Any]:
         """Ingest an already-staged file, bypassing the inline text-only size ceiling.
 
         The caller is responsible for having staged the bytes safely; this only owns
@@ -271,8 +339,11 @@ class AgentGateway:
                 "artifact_kind",
                 "profile",
                 "error",
+                "stored_path",
             )
-        } | ({"memory": memory} if memory else {})
+        } | ({"memory": memory} if memory else {}) | (
+            {"object_key": object_key} if object_key else {}
+        )
 
     def delete_case(self, case_id: str, *, confirmation: str) -> dict[str, Any]:
         """Permanently remove a case, its uploaded bytes, and its indexed memory.
@@ -337,6 +408,11 @@ class AgentGateway:
                         removed_files += 1
                 shutil.rmtree(case_directory, ignore_errors=False)
 
+            # And the durable copies in object storage, which are the point of it.
+            objects_removed = self.objects.delete_prefix(
+                f"tenants/{self.config.tenant or 'operator'}/cases/{case_id}"
+            )
+
             still_present = case_directory.exists()
             remaining_rows = connection.execute(
                 "SELECT COUNT(*) FROM research_cases WHERE id = ?", (case_id,)
@@ -356,6 +432,7 @@ class AgentGateway:
             "bytes_removed": removed_bytes,
             "file_manifest": files,
             "memory_messages_removed": memory_deleted,
+            "objects_removed": objects_removed,
             "directory_removed": str(case_directory),
             "verified_absent": not still_present and remaining_rows == 0,
             "claims_left_in_ledger": linked_claims,

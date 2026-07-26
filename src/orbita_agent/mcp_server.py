@@ -5,11 +5,12 @@ import hmac
 import json
 import os
 import shutil
+import tempfile
 import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Iterator, Literal
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken
@@ -20,6 +21,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from . import __version__
+from .adjudication import adjudicate_epistemic_task, compress_epistemic_task
+from .archive_policy import ArchiveIngestionRefused, ArchivePolicy
+from .code_context import compress_code_context
 from .config import AgentConfig
 from .gateway import AgentGateway
 from .genome_client import (
@@ -31,7 +35,7 @@ from .genome_client import (
     hash_json,
     tournament_result_receipt,
 )
-from .archive_policy import ArchiveIngestionRefused, ArchivePolicy
+from .object_store import ObjectStoreError
 from .oauth import ORBITA_SCOPE, GitHubOAuthProvider
 from .tenancy import LegacySinglePrincipal, TenantResolutionError, build_registry
 from .uploads import UploadError, UploadTicketStore, max_upload_bytes
@@ -290,31 +294,45 @@ def build_mcp_server(
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=403)
 
         tenant_gateway = _gateway_for_tenant(claim.tenant)
-        staging = tenant_gateway.config.inbox / f"upload_{uuid.uuid4().hex}"
-        staging.mkdir(parents=True, exist_ok=True)
-        target = staging / claim.filename
 
-        written = 0
+        # Read the whole body before handing it on, because the gateway's storage
+        # interface is synchronous while the request stream is not. The ticket ceiling is
+        # applied here so an oversized body is cut off as it arrives rather than after.
         digest = hashlib.sha256()
+        buffer = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024)
+        written = 0
         try:
-            with target.open("wb") as handle:
-                async for chunk in request.stream():
-                    if not chunk:
-                        continue
-                    written += len(chunk)
-                    # Enforced while streaming, not after. A ticket for 10 MB must not
-                    # let 10 GB reach the volume before anyone checks.
-                    if written > claim.max_bytes:
-                        raise UploadError(
-                            f"upload exceeded the {claim.max_bytes} byte ceiling for this ticket"
-                        )
-                    digest.update(chunk)
-                    handle.write(chunk)
+            async for chunk in request.stream():
+                if not chunk:
+                    continue
+                written += len(chunk)
+                if written > claim.max_bytes:
+                    raise UploadError(
+                        f"upload exceeded the {claim.max_bytes} byte ceiling for this ticket"
+                    )
+                digest.update(chunk)
+                buffer.write(chunk)
             if written == 0:
                 raise UploadError("upload was empty")
-            record = tenant_gateway.ingest_upload(case_id=claim.case_id, path=target)
-        except UploadError as exc:
+            buffer.seek(0)
+
+            def _chunks() -> Iterator[bytes]:
+                while True:
+                    piece = buffer.read(1024 * 1024)
+                    if not piece:
+                        return
+                    yield piece
+
+            record = tenant_gateway.receive_upload(
+                case_id=claim.case_id,
+                filename=claim.filename,
+                chunks=_chunks(),
+                max_bytes=claim.max_bytes,
+            )
+        except (UploadError, ObjectStoreError) as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=413)
+        except ArchiveIngestionRefused as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=403)
         except KeyError:
             return JSONResponse({"ok": False, "error": "unknown case"}, status_code=404)
         except Exception as exc:  # noqa: BLE001 - the client gets a type, never a traceback
@@ -323,7 +341,7 @@ def build_mcp_server(
                 status_code=500,
             )
         finally:
-            shutil.rmtree(staging, ignore_errors=True)
+            buffer.close()
 
         return JSONResponse(
             {
@@ -686,6 +704,44 @@ def build_mcp_server(
     def orbita_case_context(case_id: str) -> dict[str, Any]:
         """Read deterministic data profiles, plan versions, and compact run state before proposing analysis."""
         return _gateway_for_caller().case_context(case_id)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_adjudicate_epistemic_task(task: dict[str, Any]) -> dict[str, Any]:
+        """Adjudicate one bounded public task with deterministic evidence rules and no model calls.
+
+        Submit structured context, event sequence, and target IDs only. Gold labels
+        are rejected. The tool is read-only and reports its exact evidence, proof,
+        receipt, and replication basis plus explicit scope limitations.
+        """
+        return adjudicate_epistemic_task(task)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_compress_epistemic_task(
+        task: dict[str, Any],
+        max_context_items: int = 8,
+    ) -> dict[str, Any]:
+        """Select target-relevant context for a bounded public task without model calls.
+
+        Gold labels are rejected. The result includes the compact task plus a
+        receipt listing every retained and dropped context ID and exact size
+        reduction. The source task is not mutated.
+        """
+        return compress_epistemic_task(task, max_context_items=max_context_items)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_compress_code_context(
+        issue: str,
+        files: list[dict[str, Any]],
+        max_files: int = 6,
+        max_characters: int = 80_000,
+    ) -> dict[str, Any]:
+        """Select issue-relevant code and test files without filesystem or model access."""
+        return compress_code_context(
+            issue,
+            files,
+            max_files=max_files,
+            max_characters=max_characters,
+        )
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_compile_plan(case_id: str, max_candidates: int | None = None) -> dict[str, Any]:
