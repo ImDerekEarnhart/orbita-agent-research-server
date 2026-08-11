@@ -137,8 +137,33 @@ class DiscoveryGenomeClient:
             return {"configured": False, "missing": missing}
         return {"configured": True, **self._request("GET", "/status")}
 
+    def core_tenant_id(self) -> str:
+        """Resolve this Guided username to its opaque shared-core tenant boundary."""
+        value = str(self._request("GET", "/status").get("core_tenant_id") or "")
+        if len(value) != 34 or not value.startswith("g-"):
+            raise DiscoveryGenomeError("Discovery Genome service did not return a core tenant identity")
+        digest = value[2:]
+        if any(character not in "0123456789abcdef" for character in digest):
+            raise DiscoveryGenomeError("Discovery Genome service returned an invalid core tenant identity")
+        return value
+
     def list_operators(self) -> dict[str, Any]:
         return self._request("GET", "/operators")
+
+    def list_graphs(self) -> dict[str, Any]:
+        return self._request("GET", "/graphs")
+
+    def programme_state(self, graph_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/graphs/{quote(graph_id, safe='')}/programme-state")
+
+    def compile_programme_state(self, graph_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/graphs/{quote(graph_id, safe='')}/programme-state/compile", {})
+
+    def list_questions(self, graph_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/graphs/{quote(graph_id, safe='')}/questions")
+
+    def generate_questions(self, graph_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/graphs/{quote(graph_id, safe='')}/questions/generate", {})
 
     def seed_operators(self) -> dict[str, Any]:
         return self._request("POST", "/operators/seed", {})

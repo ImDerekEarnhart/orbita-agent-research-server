@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Any
 
 from .models import ActorRole, EvidenceKind, ObjectKind, Stance, SupportState
 from .relations import normalize_identifier, normalize_name
@@ -232,7 +233,7 @@ class ControlledSemanticParser:
     pattern fired.
     """
 
-    def __init__(self, runtime: "WarrantedLanguageRuntime"):
+    def __init__(self, runtime: WarrantedLanguageRuntime):
         self.runtime = runtime
 
     def parse(self, utterance: str) -> SemanticFrame:
@@ -383,7 +384,7 @@ class WarrantedLanguageRuntime:
     sentence-level receipt for every response.
     """
 
-    def __init__(self, ledger: "EpistemicLedger"):
+    def __init__(self, ledger: EpistemicLedger):
         self.ledger = ledger
         from .support import SupportEngine
 
@@ -535,7 +536,6 @@ class WarrantedLanguageRuntime:
             return GroundingReport(reference, GroundingState.UNKNOWN_ENTITY, missing=[reference])
         except ValueError:
             return GroundingReport(reference, GroundingState.AMBIGUOUS_ENTITY, missing=[reference])
-        entity = self.ledger.relations.get_entity(entity_id)
         return self._ground_entity(entity_id, reference=reference, max_depth=max_depth, stack=[])
 
     def _ground_entity(

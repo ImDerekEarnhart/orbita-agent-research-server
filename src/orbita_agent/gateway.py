@@ -4,19 +4,20 @@ import re
 import shutil
 import threading
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import pandas as pd
 
 from orbita_mvp import ResearchMVP
 
 from . import __version__
+from .archive_policy import ArchivePolicy
 from .config import AgentConfig
 from .graph_adapter import analyze_graph, export_lean_certificate
 from .improvement import PROMOTION_PHRASE, ROLLBACK_PHRASE, ImprovementLab
 from .knowledge import KnowledgeStore
-from .archive_policy import ArchivePolicy
 from .memory_index import MemoryIndex, chat_export_members
 from .object_store import build_object_store, object_key
 from .reversals import find_candidate_reversals
@@ -76,6 +77,14 @@ class AgentGateway:
         self.close()
 
     def capabilities(self) -> dict[str, Any]:
+        try:
+            active_policy = self.improvements.active_policy()
+        except Exception as exc:  # capability discovery must remain available during partial outages
+            active_policy = {"status": "unavailable", "error_type": type(exc).__name__}
+        try:
+            knowledge = self.knowledge.status()
+        except Exception as exc:  # report a bounded diagnostic instead of breaking tool discovery
+            knowledge = {"status": "unavailable", "error_type": type(exc).__name__}
         return {
             "product": "Orbita Agent Research Server",
             "version": __version__,
@@ -98,14 +107,15 @@ class AgentGateway:
                 "mode": "bounded_policy_improvement",
                 "promotion_phrase": PROMOTION_PHRASE,
                 "rollback_phrase": ROLLBACK_PHRASE,
-                "active_policy": self.improvements.active_policy(),
+                "active_policy": active_policy,
             },
             "limits": {
                 "max_inline_bytes": self.config.max_inline_bytes,
                 "max_graph_vertices": self.config.max_graph_vertices,
                 "max_graph_edges": self.config.max_graph_edges,
             },
-            "knowledge": self.knowledge.status(),
+            "archive_processing": self.service.ingestor.describe(),
+            "knowledge": knowledge,
             "boundaries": [
                 "Surviving a configured gauntlet is not universal proof, causality, or novelty.",
                 "Plan approval is a distinct hash-bound action.",

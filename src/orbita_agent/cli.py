@@ -10,9 +10,9 @@ from typing import Any
 
 from .config import AgentConfig
 from .gateway import APPROVAL_PHRASE, AgentGateway
-from .workspace_migration import apply_migration, plan_migration
 from .mcp_server import build_mcp_server
 from .tenancy import TenantResolutionError, build_registry
+from .workspace_migration import apply_migration, plan_migration
 
 
 def _config(home: str | None) -> AgentConfig:

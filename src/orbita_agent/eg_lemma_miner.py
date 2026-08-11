@@ -22,9 +22,10 @@ import json
 import math
 import random
 import time
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Any
 
 import networkx as nx
 
@@ -53,7 +54,7 @@ def normalize_graph(graph: nx.Graph) -> nx.Graph:
     return nx.convert_node_labels_to_integers(graph, ordering="sorted")
 
 
-def canonical_edges(graph: nx.Graph) -> List[List[int]]:
+def canonical_edges(graph: nx.Graph) -> list[list[int]]:
     return [
         [int(u), int(v)]
         for u, v in sorted((min(a, b), max(a, b)) for a, b in graph.edges())
@@ -67,8 +68,8 @@ def graph_from_edges(n: int, edges: Sequence[Sequence[int]]) -> nx.Graph:
     return normalize_graph(graph)
 
 
-def powers_of_two_up_to(n: int) -> List[int]:
-    values: List[int] = []
+def powers_of_two_up_to(n: int) -> list[int]:
+    values: list[int] = []
     value = 4
     while value <= n:
         values.append(value)
@@ -79,8 +80,8 @@ def powers_of_two_up_to(n: int) -> List[int]:
 def enumerate_cycles_exact(
     graph: nx.Graph,
     length: int,
-    limit: Optional[int] = None,
-) -> List[List[int]]:
+    limit: int | None = None,
+) -> list[list[int]]:
     """Enumerate undirected simple cycles of exactly the requested length.
 
     Each cycle is returned once. The first vertex is the minimum vertex in the
@@ -92,7 +93,7 @@ def enumerate_cycles_exact(
         return []
 
     adjacency = {u: sorted(graph.neighbors(u)) for u in graph.nodes()}
-    found: List[List[int]] = []
+    found: list[list[int]] = []
 
     for start in sorted(graph.nodes()):
         path = [start]
@@ -122,7 +123,7 @@ def enumerate_cycles_exact(
     return found
 
 
-def count_cycles_exact(graph: nx.Graph, length: int, cap: Optional[int] = None) -> int:
+def count_cycles_exact(graph: nx.Graph, length: int, cap: int | None = None) -> int:
     return len(enumerate_cycles_exact(graph, length, limit=cap))
 
 
@@ -130,7 +131,7 @@ def find_cycle_exact_bounded(
     graph: nx.Graph,
     length: int,
     limits: SearchLimits,
-) -> Optional[List[int]]:
+) -> list[int] | None:
     """Exact DFS for one simple cycle, with honest timeout/state limits."""
     graph = normalize_graph(graph)
     if length < 3 or graph.number_of_nodes() < length:
@@ -157,7 +158,7 @@ def find_cycle_exact_bounded(
         path = [start]
         visited = {start}
 
-        def dfs(vertex: int) -> Optional[List[int]]:
+        def dfs(vertex: int) -> list[int] | None:
             check_limits()
             if len(path) == length:
                 if start in adjacency[vertex]:
@@ -183,7 +184,7 @@ def find_cycle_exact_bounded(
     return None
 
 
-def exact_girth(graph: nx.Graph) -> Optional[int]:
+def exact_girth(graph: nx.Graph) -> int | None:
     """Return exact girth for an undirected graph, or None for a forest."""
     graph = normalize_graph(graph)
     best = math.inf
@@ -209,7 +210,7 @@ def exact_girth(graph: nx.Graph) -> Optional[int]:
     return None if best == math.inf else int(best)
 
 
-def power_hardness_counts(graph: nx.Graph) -> Tuple[int, int]:
+def power_hardness_counts(graph: nx.Graph) -> tuple[int, int]:
     return count_cycles_exact(graph, 4), count_cycles_exact(graph, 8)
 
 
@@ -232,7 +233,7 @@ def random_cubic_graph(n: int, seed: int) -> nx.Graph:
     return normalize_graph(nx.random_regular_graph(3, n, seed=seed))
 
 
-def attempt_two_switch(graph: nx.Graph, rng: random.Random) -> Optional[Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int], Tuple[int, int]]]:
+def attempt_two_switch(graph: nx.Graph, rng: random.Random) -> tuple[tuple[int, int], tuple[int, int], tuple[int, int], tuple[int, int]] | None:
     edges = list(graph.edges())
     if len(edges) < 2:
         return None
@@ -261,7 +262,7 @@ def attempt_two_switch(graph: nx.Graph, rng: random.Random) -> Optional[Tuple[Tu
 
 def undo_two_switch(
     graph: nx.Graph,
-    change: Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int], Tuple[int, int]],
+    change: tuple[tuple[int, int], tuple[int, int], tuple[int, int], tuple[int, int]],
 ) -> None:
     edge1, edge2, new1, new2 = change
     graph.remove_edge(*new1)
@@ -331,7 +332,7 @@ def three_core(graph: nx.Graph) -> nx.Graph:
     return normalize_graph(nx.k_core(graph, k=3))
 
 
-def proper_three_core_witness(graph: nx.Graph) -> Optional[Dict[str, Any]]:
+def proper_three_core_witness(graph: nx.Graph) -> dict[str, Any] | None:
     """Find a proper deletion whose remaining graph has a nonempty 3-core.
 
     If no such single vertex or edge deletion exists, then no proper subgraph
@@ -369,10 +370,10 @@ def proper_three_core_witness(graph: nx.Graph) -> Optional[Dict[str, Any]]:
     return None
 
 
-def reduce_to_critical_three_core(graph: nx.Graph) -> Tuple[nx.Graph, List[Dict[str, Any]]]:
+def reduce_to_critical_three_core(graph: nx.Graph) -> tuple[nx.Graph, list[dict[str, Any]]]:
     """Repeatedly shrink to a proper nonempty 3-core when one exists."""
     current = normalize_graph(graph)
-    steps: List[Dict[str, Any]] = []
+    steps: list[dict[str, Any]] = []
 
     while True:
         witness = proper_three_core_witness(current)
@@ -395,7 +396,7 @@ def reduce_to_critical_three_core(graph: nx.Graph) -> Tuple[nx.Graph, List[Dict[
     return normalize_graph(current), steps
 
 
-def carr_structure_profile(graph: nx.Graph) -> Dict[str, Any]:
+def carr_structure_profile(graph: nx.Graph) -> dict[str, Any]:
     """Check necessary conditions from Carr's 2026 minimal-counterexample note."""
     graph = normalize_graph(graph)
     degrees = dict(graph.degree())
@@ -430,13 +431,13 @@ def carr_structure_profile(graph: nx.Graph) -> Dict[str, Any]:
     }
 
 
-def bfs_layer_profile(graph: nx.Graph, radius: int = 4) -> Dict[str, Any]:
+def bfs_layer_profile(graph: nx.Graph, radius: int = 4) -> dict[str, Any]:
     graph = normalize_graph(graph)
-    root_profiles: List[Dict[str, Any]] = []
+    root_profiles: list[dict[str, Any]] = []
 
     for root in sorted(graph.nodes()):
         distances = nx.single_source_shortest_path_length(graph, root, cutoff=radius)
-        layers: Dict[int, List[int]] = {
+        layers: dict[int, list[int]] = {
             depth: sorted(int(v) for v, d in distances.items() if d == depth)
             for depth in range(radius + 1)
         }
@@ -477,8 +478,8 @@ def bfs_layer_profile(graph: nx.Graph, radius: int = 4) -> Dict[str, Any]:
             }
         )
 
-    def values_at(key: str, index: Optional[int] = None) -> List[int]:
-        values: List[int] = []
+    def values_at(key: str, index: int | None = None) -> list[int]:
+        values: list[int] = []
         for profile in root_profiles:
             value = profile[key]
             if index is not None:
@@ -486,7 +487,7 @@ def bfs_layer_profile(graph: nx.Graph, radius: int = 4) -> Dict[str, Any]:
             values.append(int(value))
         return values
 
-    summary: Dict[str, Any] = {"radius": radius, "roots": root_profiles}
+    summary: dict[str, Any] = {"radius": radius, "roots": root_profiles}
     for depth in range(radius + 1):
         values = values_at("layer_sizes", depth)
         summary[f"layer{depth}_min"] = min(values, default=0)
@@ -498,19 +499,19 @@ def bfs_layer_profile(graph: nx.Graph, radius: int = 4) -> Dict[str, Any]:
     return summary
 
 
-def cycle_spectrum(graph: nx.Graph, max_length: int = 12) -> Dict[str, int]:
+def cycle_spectrum(graph: nx.Graph, max_length: int = 12) -> dict[str, int]:
     return {
         str(length): count_cycles_exact(graph, length)
         for length in range(3, min(max_length, graph.number_of_nodes()) + 1)
     }
 
 
-def power_cycle_profile(graph: nx.Graph, limits: SearchLimits) -> Dict[str, Any]:
+def power_cycle_profile(graph: nx.Graph, limits: SearchLimits) -> dict[str, Any]:
     graph = normalize_graph(graph)
-    profile: Dict[str, Any] = {}
-    first: Optional[Dict[str, Any]] = None
+    profile: dict[str, Any] = {}
+    first: dict[str, Any] | None = None
     complete = True
-    reason: Optional[str] = None
+    reason: str | None = None
 
     for length in powers_of_two_up_to(graph.number_of_nodes()):
         try:
@@ -548,8 +549,8 @@ def classify_graph(
     graph: nx.Graph,
     source: str,
     limits: SearchLimits,
-    extra: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     graph = normalize_graph(graph)
     degrees = [int(degree) for _, degree in graph.degree()]
     c4_count, c8_count = power_hardness_counts(graph)
@@ -589,7 +590,7 @@ def classify_graph(
     return record
 
 
-def numeric_feature_row(record: Dict[str, Any]) -> Dict[str, Any]:
+def numeric_feature_row(record: dict[str, Any]) -> dict[str, Any]:
     carr = record["carr_2026_profile"]
     bfs = record["bfs_layer_profile"]
     first = record.get("first_power_cycle")
@@ -616,7 +617,7 @@ def numeric_feature_row(record: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def mine_empirical_ranges(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+def mine_empirical_ranges(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
     deep = [r for r in records if r["c4_count"] == 0 and r["c8_count"] == 0]
     c8_near = [
         r
@@ -636,7 +637,7 @@ def mine_empirical_ranges(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "layer4_max",
         "layer2_collision_total",
     ]
-    ranges: Dict[str, Any] = {}
+    ranges: dict[str, Any] = {}
     for key in numeric_keys:
         values = [float(row[key]) for row in rows]
         if values:
@@ -647,7 +648,7 @@ def mine_empirical_ranges(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "every_vertex_adjacent_to_degree3",
         "proper_subgraph_condition_passes",
     ]
-    invariants: Dict[str, Any] = {}
+    invariants: dict[str, Any] = {}
     for key in boolean_keys:
         values = [bool(row[key]) for row in rows]
         if values and all(values):
@@ -669,7 +670,7 @@ def mine_empirical_ranges(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def lemma_inventory(empirical: Dict[str, Any]) -> List[Dict[str, Any]]:
+def lemma_inventory(empirical: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         {
             "id": "L1_C4_BRANCH_DISJOINTNESS",
@@ -733,7 +734,7 @@ def regression_power_hard_n30() -> nx.Graph:
     return graph_from_edges(30, edges)
 
 
-def named_graphs() -> Iterator[Tuple[str, nx.Graph]]:
+def named_graphs() -> Iterator[tuple[str, nx.Graph]]:
     yield "regression_power_hard_n30", regression_power_hard_n30()
     factories = [
         ("petersen_graph", nx.petersen_graph),
@@ -749,7 +750,7 @@ def named_graphs() -> Iterator[Tuple[str, nx.Graph]]:
         yield name, normalize_graph(factory())
 
 
-def load_prior_summary(path: Path) -> List[Tuple[int, nx.Graph, Dict[str, Any]]]:
+def load_prior_summary(path: Path) -> list[tuple[int, nx.Graph, dict[str, Any]]]:
     if not path.exists():
         raise FileNotFoundError(path)
 
@@ -767,7 +768,7 @@ def load_prior_summary(path: Path) -> List[Tuple[int, nx.Graph, Dict[str, Any]]]
         obj = json.loads(text)
         items = obj.get("top_near_misses", []) if isinstance(obj, dict) else []
 
-    records: List[Tuple[int, nx.Graph, Dict[str, Any]]] = []
+    records: list[tuple[int, nx.Graph, dict[str, Any]]] = []
     for index, item in enumerate(items):
         if not isinstance(item, dict) or "n" not in item or "edges" not in item:
             continue
@@ -780,13 +781,13 @@ def write_json(path: Path, obj: Any) -> None:
     path.write_text(json.dumps(obj, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def write_jsonl(path: Path, records: Iterable[Dict[str, Any]]) -> None:
+def write_jsonl(path: Path, records: Iterable[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for record in records:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
 
 
-def write_csv(path: Path, records: Sequence[Dict[str, Any]]) -> None:
+def write_csv(path: Path, records: Sequence[dict[str, Any]]) -> None:
     rows = [numeric_feature_row(record) for record in records]
     if not rows:
         return
@@ -798,9 +799,9 @@ def write_csv(path: Path, records: Sequence[Dict[str, Any]]) -> None:
 
 def write_report(
     path: Path,
-    records: Sequence[Dict[str, Any]],
-    empirical: Dict[str, Any],
-    lemmas: Sequence[Dict[str, Any]],
+    records: Sequence[dict[str, Any]],
+    empirical: dict[str, Any],
+    lemmas: Sequence[dict[str, Any]],
 ) -> None:
     deep = [r for r in records if r["c4_count"] == 0 and r["c8_count"] == 0]
     c8_near = [r for r in records if r["c4_count"] == 0 and r["c8_count"] > 0]
@@ -870,7 +871,7 @@ def write_report(
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def compatible_lean_summary(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+def compatible_lean_summary(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
     witnesses = []
     ordered = sorted(
         records,
@@ -904,7 +905,7 @@ def compatible_lean_summary(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]
     }
 
 
-def parse_n_values(text: str) -> List[int]:
+def parse_n_values(text: str) -> list[int]:
     values = []
     for part in text.split(","):
         value = int(part.strip())
@@ -933,7 +934,7 @@ def main() -> None:
     args = parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
     limits = SearchLimits(args.cycle_timeout, args.max_dfs_states)
-    records: List[Dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
 
     print("Erdos-Gyarfas Lemma Miner v1")
     print("Finite-world only. No universal proof claimed.")
@@ -969,7 +970,7 @@ def main() -> None:
         )
 
     for n in args.n_values:
-        best: Optional[OptimizationResult] = None
+        best: OptimizationResult | None = None
         for restart in range(args.restarts):
             seed = args.seed + n * 10_000 + restart
             print(

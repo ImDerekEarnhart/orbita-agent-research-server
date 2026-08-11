@@ -20,8 +20,41 @@ class KnowledgeStore:
         self.path = Path(path) if path is not None else bundled_knowledge_path()
         if not self.path.exists():
             raise FileNotFoundError(f"Knowledge database not found: {self.path}")
-        self.conn = sqlite3.connect(f"file:{self.path.resolve()}?mode=ro", uri=True)
+        # Tenant gateways may be created by an ASGI request thread and closed by the
+        # application lifecycle thread. Access is read-only, and AgentGateway supplies
+        # the operation lock for callers that need serialization.
+        self.conn = sqlite3.connect(
+            f"file:{self.path.resolve()}?mode=ro",
+            uri=True,
+            check_same_thread=False,
+        )
         self.conn.row_factory = sqlite3.Row
+        try:
+            integrity = self.conn.execute("PRAGMA quick_check").fetchone()
+            required = {
+                "metadata",
+                "documents",
+                "documents_fts",
+                "claim_cards",
+                "eg_runs",
+                "eg_highlights",
+                "eg_claims",
+            }
+            available = {
+                str(row[0])
+                for row in self.conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')")
+            }
+        except sqlite3.DatabaseError as exc:
+            self.conn.close()
+            raise RuntimeError(
+                f"Bundled Orbita knowledge database is unreadable: {self.path}. "
+                "Rebuild it with tools/build_knowledge.py before packaging or deployment."
+            ) from exc
+        missing = required - available
+        if not integrity or integrity[0] != "ok" or missing:
+            self.conn.close()
+            detail = f"missing tables: {', '.join(sorted(missing))}" if missing else "integrity check failed"
+            raise RuntimeError(f"Bundled Orbita knowledge database is invalid ({detail}): {self.path}")
 
     def close(self) -> None:
         self.conn.close()

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
+import functools
 import hashlib
 import hmac
 import json
 import os
-import shutil
 import tempfile
 import threading
-import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Any, Iterator, Literal
+from typing import Any, Literal
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken
@@ -35,8 +34,9 @@ from .genome_client import (
     hash_json,
     tournament_result_receipt,
 )
-from .object_store import ObjectStoreError
+from .guided_service import install_guided_service_routes
 from .oauth import ORBITA_SCOPE, GitHubOAuthProvider
+from .object_store import ObjectStoreError
 from .tenancy import LegacySinglePrincipal, TenantResolutionError, build_registry
 from .uploads import UploadError, UploadTicketStore, max_upload_bytes
 
@@ -197,7 +197,7 @@ def build_mcp_server(
                 "ORBITA_GENOME_TENANT_BINDINGS before serving the Genome bridge"
             )
 
-    def _resolve_tenant() -> str:
+    def _resolve_genome_username() -> str:
         """Resolve the calling identity to exactly one Genome tenant, or refuse."""
         if remote_auth.label != "oauth-github":
             # Bearer and unauthenticated modes have a single deployment operator and no
@@ -211,9 +211,23 @@ def build_mcp_server(
         token = get_access_token()
         return tenants.resolve(token.subject if token else None)
 
+    @functools.lru_cache(maxsize=256)
+    def _core_tenant_for_username(username: str) -> str:
+        return genome.for_username(username).core_tenant_id()
+
+    def _resolve_core_tenant() -> str:
+        """Resolve the caller to the opaque tenant also used by Guided Orbita."""
+        username = _resolve_genome_username()
+        # A deployment without the Guided bridge keeps its historical username
+        # workspace. Once the bridge is configured, fail closed unless it resolves
+        # the exact opaque Guided tenant.
+        if genome.config.missing():
+            return username
+        return _core_tenant_for_username(username)
+
     def _genome_for_caller() -> DiscoveryGenomeClient:
         try:
-            return genome.for_username(_resolve_tenant())
+            return genome.for_username(_resolve_genome_username())
         except TenantResolutionError as exc:
             raise DiscoveryGenomeError(str(exc)) from exc
 
@@ -239,7 +253,7 @@ def build_mcp_server(
         """
         if remote_auth.label != "oauth-github":
             return gateway
-        return _gateway_for_tenant(_resolve_tenant())
+        return _gateway_for_tenant(_resolve_core_tenant())
 
     mcp = FastMCP(
         "Orbita Agent Research Server",
@@ -258,6 +272,8 @@ def build_mcp_server(
         token_verifier=remote_auth.token_verifier,
         auth_server_provider=remote_auth.oauth_provider,
     )
+
+    install_guided_service_routes(mcp, gateway_for_tenant=_gateway_for_tenant)
 
     if remote_auth.oauth_provider:
 
@@ -376,7 +392,13 @@ def build_mcp_server(
             described = _gateway_for_caller().capabilities()
         except TenantResolutionError:
             described = gateway.capabilities()
-        return described | {"archive_intake": ArchivePolicy.from_env().describe()}
+        return described | {
+            "archive_intake": ArchivePolicy.from_env().describe()
+            | {
+                "max_upload_bytes": max_upload_bytes(),
+                "transport": "single-use capability URL streamed to object storage",
+            }
+        }
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_list_cases() -> list[dict[str, Any]]:
@@ -427,12 +449,37 @@ def build_mcp_server(
         token = get_access_token() if remote_auth.label == "oauth-github" else None
         subject = token.subject if token else None
         try:
-            _resolve_tenant()
+            _resolve_genome_username()
         except TenantResolutionError as exc:
             return {"subject": subject, "tenant_bound": False, "reason": str(exc)}
         # The resolved tenant name is deliberately not returned; callers only need to
         # know that their own identity is bound.
         return {"subject": subject, "tenant_bound": True}
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_genome_list_graphs() -> dict[str, Any]:
+        """List this tenant's Guided memory graphs so an agent can select an auditable programme."""
+        return _genome_for_caller().list_graphs()
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_genome_programme_state(graph_id: str) -> dict[str, Any]:
+        """Read the latest compiled programme state for one tenant-owned Guided memory graph."""
+        return _genome_for_caller().programme_state(graph_id)
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_genome_compile_programme_state(graph_id: str) -> dict[str, Any]:
+        """Compile an auditable programme-state snapshot without accepting or executing any question."""
+        return _genome_for_caller().compile_programme_state(graph_id)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_genome_list_questions(graph_id: str) -> dict[str, Any]:
+        """List review-needed follow-up questions generated for a tenant-owned Guided graph."""
+        return _genome_for_caller().list_questions(graph_id)
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_genome_generate_questions(graph_id: str) -> dict[str, Any]:
+        """Generate follow-up question cards from programme state; nothing is accepted or run."""
+        return _genome_for_caller().generate_questions(graph_id)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_genome_list_operators() -> dict[str, Any]:
@@ -670,7 +717,7 @@ def build_mcp_server(
         # Resolve the case first, so an unknown case or another tenant's case fails here,
         # before any capability exists to be leaked.
         caller.case_context(case_id)
-        tenant = _resolve_tenant() if remote_auth.label == "oauth-github" else None
+        tenant = _resolve_core_tenant() if remote_auth.label == "oauth-github" else None
         # Refuse before minting, so a tenant who may not store an archive never receives
         # a URL that would accept one.
         try:

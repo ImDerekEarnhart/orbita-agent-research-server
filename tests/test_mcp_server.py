@@ -45,6 +45,11 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
         "orbita_rollback_improvement",
         "orbita_genome_status",
         "orbita_genome_list_operators",
+        "orbita_genome_list_graphs",
+        "orbita_genome_programme_state",
+        "orbita_genome_compile_programme_state",
+        "orbita_genome_list_questions",
+        "orbita_genome_generate_questions",
         "orbita_genome_create_operator",
         "orbita_genome_freeze_operator",
         "orbita_genome_create_tournament",
@@ -64,6 +69,8 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
     assert tools["orbita_promote_improvement"].annotations.destructiveHint is True
     assert tools["orbita_rollback_improvement"].annotations.destructiveHint is True
     assert tools["orbita_genome_status"].annotations.readOnlyHint is True
+    assert tools["orbita_genome_list_questions"].annotations.readOnlyHint is True
+    assert tools["orbita_genome_generate_questions"].annotations.readOnlyHint is False
     assert tools["orbita_genome_freeze_operator"].annotations.destructiveHint is True
     assert tools["orbita_genome_freeze_tournament"].annotations.destructiveHint is True
     assert tools["orbita_genome_record_result"].annotations.destructiveHint is True
@@ -73,6 +80,19 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
 def test_runtime_version_metadata_matches_package(gateway, monkeypatch):
     monkeypatch.setattr(gateway.knowledge, "status", lambda: {})
     assert gateway.capabilities()["version"] == __version__ == "0.4.0"
+
+
+def test_capabilities_executes_through_the_real_mcp_surface(gateway, monkeypatch):
+    monkeypatch.setattr(gateway.knowledge, "status", lambda: {"status": "ready"})
+    mcp, _ = build_mcp_server(gateway=gateway)
+
+    _content, structured = asyncio.run(mcp.call_tool("orbita_capabilities", {}))
+
+    assert structured["version"] == __version__
+    assert structured["self_improvement"]["mode"] == "bounded_policy_improvement"
+    assert structured["archive_intake"]["encryption_reviewed"] is False
+    assert structured["archive_processing"]["zip_strategy"] == "complete_inventory_bounded_selective_parse"
+    assert structured["archive_intake"]["max_upload_bytes"] > 0
 
 
 def test_mcp_schemas_are_machine_usable(gateway):

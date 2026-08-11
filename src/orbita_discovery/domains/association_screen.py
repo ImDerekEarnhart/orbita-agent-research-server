@@ -33,7 +33,7 @@ class AssociationScreenDomain:
         for k in range(n_noise):
             self.cols[f"noise_{k}"] = [rng.gauss(0, 1) for _ in range(n)]
         # outcome depends ONLY on the two real drivers
-        self.y = [2.5 * a + 1.8 * b + rng.gauss(0, 0.6) for a, b in zip(x_strong, x_mod)]
+        self.y = [2.5 * a + 1.8 * b + rng.gauss(0, 0.6) for a, b in zip(x_strong, x_mod, strict=False)]
 
     def propose(self):
         for name in self.cols:
@@ -48,7 +48,8 @@ class AssociationScreenDomain:
         idx = list(range(len(evidence["y"])))
         random.Random(seed).shuffle(idx)
         cut = int(0.7 * len(idx))
-        pick = lambda I: {"x": [evidence["x"][i] for i in I], "y": [evidence["y"][i] for i in I]}
+        def pick(indices):
+            return {"x": [evidence["x"][i] for i in indices], "y": [evidence["y"][i] for i in indices]}
         return pick(idx[:cut]), pick(idx[cut:])
 
     def refit(self, c: Candidate, train) -> Any:

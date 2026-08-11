@@ -6,10 +6,11 @@ import math
 import random
 import statistics
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from jsonschema import Draft202012Validator
 
@@ -18,7 +19,7 @@ RESPONSE_SCHEMA_VERSION = "1.0"
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _stable_json(value: Any) -> str:
@@ -223,7 +224,7 @@ class EvaluationTaskSpec:
                 raise ValueError(f"Invalid gold discovery state for {hypothesis_id}")
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "EvaluationTaskSpec":
+    def from_dict(cls, value: dict[str, Any]) -> EvaluationTaskSpec:
         return cls(
             id=str(value["id"]),
             category=str(value["category"]),
@@ -273,7 +274,7 @@ class EvaluationSuiteSpec:
         object.__setattr__(self, "tasks", tasks)
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "EvaluationSuiteSpec":
+    def from_dict(cls, value: dict[str, Any]) -> EvaluationSuiteSpec:
         return cls(
             name=str(value["name"]),
             version=str(value["version"]),
@@ -1154,7 +1155,8 @@ class ComparativeEvaluationRuntime:
         ]
         for item in report["ranking"]:
             rates = item["metrics"]["rates"]
-            fmt = lambda value: "—" if value is None else f"{100 * value:.1f}%"
+            def fmt(value):
+                return "—" if value is None else f"{100 * value:.1f}%"
             lines.append(
                 "| {rank} | {name} | {mode} | {overall:.3f} | {ucr} | {rec} | {collapse} | {false} | {audit} | {precision} |".format(
                     rank=item["rank"],

@@ -8,10 +8,11 @@ import math
 import platform
 import statistics
 import sys
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterable
+from typing import TYPE_CHECKING, Any
 
 from .models import (
     ActorRole,
@@ -30,7 +31,7 @@ _ALLOWED_OPERATORS = {">", ">=", "<", "<=", "==", "!="}
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _stable_json(value: Any) -> str:
@@ -67,7 +68,7 @@ class MetricCondition:
             raise ValueError(f"Unsupported comparison operator: {self.operator}")
 
     @classmethod
-    def from_value(cls, value: "MetricCondition | dict[str, Any]") -> "MetricCondition":
+    def from_value(cls, value: MetricCondition | dict[str, Any]) -> MetricCondition:
         if isinstance(value, cls):
             return value
         if not isinstance(value, dict):
@@ -124,7 +125,7 @@ class AnalysisClaimTest:
             )
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "AnalysisClaimTest":
+    def from_dict(cls, value: dict[str, Any]) -> AnalysisClaimTest:
         return cls(
             claim_id=value["claim_id"],
             metric_path=value["metric_path"],
@@ -157,7 +158,7 @@ class DatasetAnalysisSpec:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "DatasetAnalysisSpec":
+    def from_dict(cls, value: dict[str, Any]) -> DatasetAnalysisSpec:
         tests = tuple(
             item if isinstance(item, AnalysisClaimTest) else AnalysisClaimTest.from_dict(item)
             for item in value.get("claim_tests", [])
@@ -185,7 +186,7 @@ class DatasetAnalysisRuntime:
     replayed and compared.
     """
 
-    def __init__(self, ledger: "EpistemicLedger", artifact_root: str | Path | None = None):
+    def __init__(self, ledger: EpistemicLedger, artifact_root: str | Path | None = None):
         self.ledger = ledger
         self.artifact_root = (
             Path(artifact_root)
@@ -614,7 +615,7 @@ class DatasetAnalysisRuntime:
             rows: list[dict[str, str]] = []
             for raw in reader:
                 cleaned: dict[str, str] = {}
-                for original, column in zip(reader.fieldnames, columns):
+                for original, column in zip(reader.fieldnames, columns, strict=False):
                     value = raw.get(original, "")
                     cleaned[column] = value.strip() if preprocessing["strip_whitespace"] else value
                 rows.append(cleaned)
@@ -707,7 +708,7 @@ class DatasetAnalysisRuntime:
         y_mean = math.fsum(ys) / len(ys)
         sxx = math.fsum((value - x_mean) ** 2 for value in xs)
         syy = math.fsum((value - y_mean) ** 2 for value in ys)
-        sxy = math.fsum((a - x_mean) * (b - y_mean) for a, b in zip(xs, ys))
+        sxy = math.fsum((a - x_mean) * (b - y_mean) for a, b in zip(xs, ys, strict=False))
         if sxx == 0 or syy == 0:
             raise AnalysisError("Pearson correlation is undefined for a constant column")
         r = sxy / math.sqrt(sxx * syy)
@@ -1182,7 +1183,7 @@ class DatasetAnalysisRuntime:
                 differences.append(
                     {"path": path, "expected_length": len(expected), "observed_length": len(observed)}
                 )
-            for index, (left, right) in enumerate(zip(expected, observed)):
+            for index, (left, right) in enumerate(zip(expected, observed, strict=False)):
                 _, child_differences = self._compare_values(
                     left,
                     right,

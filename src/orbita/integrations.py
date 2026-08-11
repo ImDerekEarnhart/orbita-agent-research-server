@@ -4,25 +4,24 @@ import hashlib
 import hmac
 import ipaddress
 import json
-import os
 import re
 import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .agent_os import (
     AutonomyMode,
     ComputerAgentRuntime,
-    ComputerStepStatus,
     SkillContract,
     SkillResult,
 )
@@ -37,7 +36,7 @@ MAX_PROVIDER_RESPONSE_BYTES = 2 * 1024 * 1024
 
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def parse_time(value: str | datetime) -> datetime:
@@ -47,8 +46,8 @@ def parse_time(value: str | datetime) -> datetime:
         raw = value.strip().replace("Z", "+00:00")
         dt = datetime.fromisoformat(raw)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def new_id(prefix: str) -> str:
@@ -163,9 +162,9 @@ class OpenClawBridge:
         }
         body = stable_json(envelope).encode("utf-8")
         request_hash = hashlib.sha256(body).hexdigest()
-        timestamp = str(int(datetime.now(timezone.utc).timestamp()))
+        timestamp = str(int(datetime.now(UTC).timestamp()))
         nonce = secrets.token_hex(16)
-        signature_payload = f"{timestamp}\n{nonce}\n{request_hash}".encode("utf-8")
+        signature_payload = f"{timestamp}\n{nonce}\n{request_hash}".encode()
         signature = hmac.new(self.shared_secret, signature_payload, hashlib.sha256).hexdigest()
         request = urllib.request.Request(
             f"{self.endpoint}/v1/capabilities/invoke",
@@ -194,7 +193,7 @@ class OpenClawBridge:
         response_hash = hashlib.sha256(raw).hexdigest()
         expected_response_signature = hmac.new(
             self.shared_secret,
-            f"{request_hash}\n{response_hash}".encode("utf-8"),
+            f"{request_hash}\n{response_hash}".encode(),
             hashlib.sha256,
         ).hexdigest()
         if not response_signature or not hmac.compare_digest(
@@ -286,7 +285,7 @@ class BrowserVerification:
     forbidden_text: list[str] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any] | None) -> "BrowserVerification":
+    def from_dict(cls, raw: dict[str, Any] | None) -> BrowserVerification:
         raw = raw or {}
         return cls(
             expected_url_prefix=raw.get("expected_url_prefix"),
@@ -307,7 +306,7 @@ class BrowserVerification:
 class IntegrationRuntime:
     """Governed external integrations and draft-first side effects."""
 
-    def __init__(self, ledger: "EpistemicLedger") -> None:
+    def __init__(self, ledger: EpistemicLedger) -> None:
         self.ledger = ledger
         self.provider: CapabilityProvider | None = None
         self.install_agent_contracts()
@@ -433,7 +432,7 @@ class IntegrationRuntime:
             parsed = datetime.fromisoformat(raw)
             if parsed.tzinfo is None:
                 parsed = parsed.replace(tzinfo=event_zone)
-            return parsed.astimezone(timezone.utc)
+            return parsed.astimezone(UTC)
 
         start_dt, end_dt = event_time(start), event_time(end)
         if end_dt <= start_dt:
@@ -1051,7 +1050,7 @@ class IntegrationRuntime:
 class ScheduledTaskRuntime:
     """SQLite-backed scheduler with leases and restart-safe plan continuation."""
 
-    def __init__(self, ledger: "EpistemicLedger") -> None:
+    def __init__(self, ledger: EpistemicLedger) -> None:
         self.ledger = ledger
 
     def create_once(
@@ -1090,7 +1089,7 @@ class ScheduledTaskRuntime:
     ) -> dict[str, Any]:
         if every_seconds < 60:
             raise ValueError("Scheduled intervals must be at least 60 seconds")
-        next_run = parse_time(first_run_at or datetime.now(timezone.utc))
+        next_run = parse_time(first_run_at or datetime.now(UTC))
         return self._create(
             name=name,
             kind=ScheduleKind.INTERVAL,
@@ -1176,7 +1175,7 @@ class ScheduledTaskRuntime:
     ) -> dict[str, Any] | None:
         if not worker_id.strip():
             raise ValueError("worker_id is required")
-        current = parse_time(now or datetime.now(timezone.utc))
+        current = parse_time(now or datetime.now(UTC))
         expiry = current + timedelta(seconds=max(30, int(lease_seconds)))
         conn = self.ledger.db.conn
         conn.execute("BEGIN IMMEDIATE")
@@ -1217,7 +1216,7 @@ class ScheduledTaskRuntime:
             raise ValueError("Schedule integrity verification failed")
         if schedule["lease_owner"] != worker_id:
             raise PermissionError("Worker does not own the schedule lease")
-        if schedule["lease_expires_at"] and parse_time(schedule["lease_expires_at"]) < datetime.now(timezone.utc):
+        if schedule["lease_expires_at"] and parse_time(schedule["lease_expires_at"]) < datetime.now(UTC):
             raise PermissionError("Schedule lease has expired")
         workspace = Path(schedule["workspace"]) if schedule["workspace"] else self.ledger.agent.boundary.root
         runtime = ComputerAgentRuntime(self.ledger, workspace)
@@ -1254,7 +1253,7 @@ class ScheduledTaskRuntime:
             ).fetchone()
         plan = runtime.run_until_blocked(active_run["plan_id"])
         plan_status = plan["status"]
-        now_dt = datetime.now(timezone.utc)
+        now_dt = datetime.now(UTC)
         now = now_dt.isoformat()
         if plan_status == "succeeded":
             run_status = "succeeded"
@@ -1357,7 +1356,7 @@ class ScheduledTaskRuntime:
         schedule = self._row(schedule_id)
         if schedule["status"] not in {ScheduleStatus.BLOCKED.value, ScheduleStatus.ACTIVE.value}:
             raise ValueError("Schedule is not resumable")
-        current = datetime.now(timezone.utc)
+        current = datetime.now(UTC)
         self.ledger.db.conn.execute(
             """UPDATE scheduled_jobs
                SET lease_owner = ?, lease_expires_at = ?, updated_at = ? WHERE id = ?""",
@@ -1367,7 +1366,7 @@ class ScheduledTaskRuntime:
         return self.run_claimed(schedule_id, worker_id)
 
     def recover_expired_leases(self, *, now: str | datetime | None = None) -> int:
-        current = parse_time(now or datetime.now(timezone.utc)).isoformat()
+        current = parse_time(now or datetime.now(UTC)).isoformat()
         cursor = self.ledger.db.conn.execute(
             """UPDATE scheduled_jobs
                SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ?

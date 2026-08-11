@@ -44,6 +44,38 @@ def test_status_reports_missing_configuration_without_network():
     assert "ORBITA_DISCOVERY_GENOME_URL" in status["missing"]
 
 
+def test_core_tenant_id_is_resolved_from_guided_status():
+    client = FakeGenomeClient([{"core_tenant_id": "g-" + "a" * 32}])
+    assert client.core_tenant_id() == "g-" + "a" * 32
+    assert client.calls == [("GET", "/status", None)]
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "dkscr711", "g-short", "g-" + "z" * 32, "x-" + "a" * 32],
+)
+def test_core_tenant_id_rejects_invalid_guided_identity(value):
+    client = FakeGenomeClient([{"core_tenant_id": value}])
+    with pytest.raises(DiscoveryGenomeError, match="core tenant identity"):
+        client.core_tenant_id()
+
+
+def test_programme_state_and_question_paths_are_tenant_bridge_calls():
+    client = FakeGenomeClient([{}, {}, {}, {}, {}])
+    client.list_graphs()
+    client.programme_state("graph/one")
+    client.compile_programme_state("graph/one")
+    client.list_questions("graph/one")
+    client.generate_questions("graph/one")
+    assert client.calls == [
+        ("GET", "/graphs", None),
+        ("GET", "/graphs/graph%2Fone/programme-state", None),
+        ("POST", "/graphs/graph%2Fone/programme-state/compile", {}),
+        ("GET", "/graphs/graph%2Fone/questions", None),
+        ("POST", "/graphs/graph%2Fone/questions/generate", {}),
+    ]
+
+
 def test_socket_timeout_is_redacted_as_unavailable(monkeypatch):
     client = DiscoveryGenomeClient(
         DiscoveryGenomeConfig(

@@ -3,14 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .ledger import EpistemicLedger, stable_json, utcnow
 from .models import ActionResult, ObligationResult, RiskLevel, StepStatus
-from .planner import CandidatePlan, CandidateStep
+from .planner import CandidatePlan
 from .support import SupportEngine
 
 

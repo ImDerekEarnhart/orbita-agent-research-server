@@ -7,10 +7,11 @@ import shutil
 import subprocess
 import uuid
 from collections import Counter, deque
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .ledger import EpistemicLedger
@@ -21,7 +22,7 @@ DIFF_SCHEMA_VERSION = "1.0"
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _new_id(prefix: str) -> str:
@@ -95,7 +96,7 @@ class EpistemicGraphRuntime:
     This keeps the visual representation faithful to the support engine.
     """
 
-    def __init__(self, ledger: "EpistemicLedger", artifact_root: str | Path | None = None):
+    def __init__(self, ledger: EpistemicLedger, artifact_root: str | Path | None = None):
         self.ledger = ledger
         if artifact_root is None:
             db_path = Path(getattr(ledger.db, "path", "orbita.db"))
@@ -1100,8 +1101,7 @@ class EpistemicGraphRuntime:
         proc = subprocess.run(
             [executable, "-Tsvg"],
             input=dot_text.encode("utf-8"),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             check=False,
             timeout=30,
         )

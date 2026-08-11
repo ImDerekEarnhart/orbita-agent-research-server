@@ -123,6 +123,35 @@ def test_listing_cases_never_reveals_another_tenants_research(two_tenants):
     assert derek_names == {"Operation Golden Gate"}
 
 
+def test_mcp_and_guided_resolve_to_the_same_opaque_core_tenant(gateway, monkeypatch):
+    _oauth_env(monkeypatch, "DerekEarnhart")
+    monkeypatch.setenv("ORBITA_GENOME_TENANT_BINDINGS", json.dumps({DEREK: "dkscr711"}))
+    monkeypatch.setenv("ORBITA_DISCOVERY_GENOME_URL", "https://guided.example")
+    monkeypatch.setenv("ORBITA_DISCOVERY_GENOME_SERVICE_TOKEN", "t" * 48)
+    core_tenant = "g-" + "a" * 32
+
+    class FakeResponse:
+        def read(self):
+            return json.dumps({"core_tenant_id": core_tenant}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr("orbita_agent.genome_client.urlopen", lambda *_args, **_kwargs: FakeResponse())
+    mcp, _ = build_mcp_server(gateway=gateway, host="0.0.0.0", port=8000)
+    monkeypatch.setattr("orbita_agent.mcp_server.get_access_token", lambda: _FakeToken(DEREK))
+
+    created = _tool(mcp, "orbita_create_case")(name="Shared-interface case", goal="")
+    guided_workspace = gateway.for_tenant(core_tenant)
+    try:
+        assert [item["id"] for item in guided_workspace.list_cases()] == [created["id"]]
+    finally:
+        guided_workspace.close()
+
+
 def test_another_tenants_case_cannot_be_written_to(two_tenants):
     mcp, act_as = two_tenants
 

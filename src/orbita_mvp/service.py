@@ -36,7 +36,7 @@ class ResearchMVP:
     def close(self) -> None:
         self.ledger.close()
 
-    def __enter__(self) -> "ResearchMVP":
+    def __enter__(self) -> ResearchMVP:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:

@@ -3,29 +3,29 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
-import os
 import re
 import shutil
 import subprocess
 import uuid
-from datetime import datetime, timezone
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from .execution import ContainerExecutionSpec
 from .models import ActorRole, RiskLevel, SupportState
 
 if TYPE_CHECKING:  # pragma: no cover
-    from .ledger import EpistemicLedger
     from .execution import OCIEngine
+    from .ledger import EpistemicLedger
 
 
 AGENT_OS_API_VERSION = "1.4"
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def new_id(prefix: str) -> str:
@@ -469,7 +469,7 @@ class ComputerGoalCompiler:
 
 
 class ComputerPlanner:
-    def __init__(self, registry: "ComputerSkillRegistry"):
+    def __init__(self, registry: ComputerSkillRegistry):
         self.registry = registry
 
     def plan(self, goal: ComputerGoalSpec) -> ComputerPlanSpec:
@@ -617,7 +617,7 @@ class ComputerPlanner:
 
 
 class ComputerSkillRegistry:
-    def __init__(self, ledger: "EpistemicLedger", boundary: WorkspaceBoundary):
+    def __init__(self, ledger: EpistemicLedger, boundary: WorkspaceBoundary):
         self.ledger = ledger
         self.boundary = boundary
         self._contracts: dict[str, SkillContract] = {}
@@ -943,7 +943,7 @@ class ComputerAgentRuntime:
     succeeded steps.
     """
 
-    def __init__(self, ledger: "EpistemicLedger", workspace: str | Path | None = None):
+    def __init__(self, ledger: EpistemicLedger, workspace: str | Path | None = None):
         self.ledger = ledger
         self.boundary = WorkspaceBoundary(workspace or (ledger.db.path.parent / "computer_workspace"))
         from .support import SupportEngine
@@ -1211,7 +1211,7 @@ class ComputerAgentRuntime:
         *,
         reviewer: str,
         rationale: str,
-        engine: "OCIEngine | None" = None,
+        engine: OCIEngine | None = None,
     ) -> dict[str, Any]:
         receipt = self.ledger.db.conn.execute(
             "SELECT * FROM computer_receipts WHERE step_id = ? ORDER BY created_at DESC LIMIT 1",

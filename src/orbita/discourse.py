@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Any
 
 from .ledger import new_id, stable_json, utcnow
 from .models import ActorRole, SupportState
@@ -21,7 +21,7 @@ class DiscourseMove:
     id: str
     semantic_act: str
     purpose: str
-    sentence: "PlannedSentence"
+    sentence: PlannedSentence
     features: dict[str, float] = field(default_factory=dict)
     score: float = 0.0
     allowed: bool = True
@@ -197,8 +197,8 @@ class GuardedSemanticActionPolicy:
 
     def features(
         self,
-        frame: "SemanticFrame",
-        sentence: "PlannedSentence",
+        frame: SemanticFrame,
+        sentence: PlannedSentence,
         *,
         position: int,
         has_any_warranted_fact: bool,
@@ -224,7 +224,7 @@ class GuardedSemanticActionPolicy:
             "no_warranted_fact": float(not has_any_warranted_fact),
         }
 
-    def gate(self, sentence: "PlannedSentence") -> tuple[bool, list[str]]:
+    def gate(self, sentence: PlannedSentence) -> tuple[bool, list[str]]:
         act = sentence.semantic_act.value
         reasons: list[str] = []
         if act == "state_supported_claim":
@@ -249,7 +249,7 @@ class GuardedSemanticActionPolicy:
                 reasons.append("warrant explanation requires evidence or proof lineage")
         return not reasons, reasons
 
-    def select(self, frame: "SemanticFrame", sentences: list["PlannedSentence"], *, max_sentences: int = 7) -> tuple[list[DiscourseMove], list[DiscourseMove], dict[str, Any]]:
+    def select(self, frame: SemanticFrame, sentences: list[PlannedSentence], *, max_sentences: int = 7) -> tuple[list[DiscourseMove], list[DiscourseMove], dict[str, Any]]:
         factual_acts = {"state_supported_claim", "state_challenged_claim", "state_refuted_claim"}
         has_any_warranted_fact = any(
             s.semantic_act.value in factual_acts and self.gate(s)[0] for s in sentences
@@ -329,7 +329,7 @@ class GuardedSemanticActionPolicy:
 
 
 class DiscoursePlanner:
-    def __init__(self, runtime: "WarrantedLanguageRuntime"):
+    def __init__(self, runtime: WarrantedLanguageRuntime):
         self.runtime = runtime
         self.policy = GuardedSemanticActionPolicy(self._load_active_ranker())
 
@@ -389,9 +389,9 @@ class DiscoursePlanner:
 
     def plan(
         self,
-        frame: "SemanticFrame",
-        grounding: dict[str, "GroundingReport"],
-        candidate_sentences: list["PlannedSentence"],
+        frame: SemanticFrame,
+        grounding: dict[str, GroundingReport],
+        candidate_sentences: list[PlannedSentence],
     ) -> DiscoursePlan:
         candidates, selected, trace = self.policy.select(frame, candidate_sentences)
         context = {

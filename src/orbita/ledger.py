@@ -3,30 +3,31 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
+from .adaptive import AdaptiveSkillRuntime
+from .agent_os import ComputerAgentRuntime
 from .analysis import DatasetAnalysisRuntime
+from .coding import CodingRuntime
 from .db import Database
-from .graph import EpistemicGraphRuntime
-from .execution import ContainerExecutionRuntime
 from .discovery import GovernedDiscoveryRuntime
 from .evaluation import ComparativeEvaluationRuntime
-from .research import EmpiricalResearchRuntime
-from .language import WarrantedLanguageRuntime
-from .agent_os import ComputerAgentRuntime
-from .coding import CodingRuntime
+from .execution import ContainerExecutionRuntime
+from .graph import EpistemicGraphRuntime
 from .integrations import IntegrationRuntime, ScheduledTaskRuntime
-from .adaptive import AdaptiveSkillRuntime
+from .language import WarrantedLanguageRuntime
 from .models import ActorRole, ClaimStatus, EvidenceKind, Stance
 from .policy import CommitPolicy
-from .relations import RelationStore
 from .proposals import ProposalAdapter
+from .relations import RelationStore
+from .research import EmpiricalResearchRuntime
 
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def new_id(prefix: str) -> str:
@@ -59,7 +60,7 @@ class EpistemicLedger:
     def close(self) -> None:
         self.db.close()
 
-    def __enter__(self) -> "EpistemicLedger":
+    def __enter__(self) -> EpistemicLedger:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:

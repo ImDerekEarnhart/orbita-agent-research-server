@@ -70,3 +70,18 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+ignore = [
+  # Long lines are widespread in frozen schemas, SQL, and research strings;
+  # formatting them mechanically would make audit diffs harder to review.
+  "E501",
+  # FastAPI's File(...) dependency declaration intentionally uses this form.
+  "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# These recursive DFS functions are created and consumed within each loop
+# iteration; they are never retained after the loop variable changes.
+"src/orbita_agent/eg_lemma_miner.py" = ["B023"]
+# This test intentionally verifies that an invalid inherited workspace cannot
+# be opened, regardless of the lower-level exception implementation.
+"tests/test_workspace_tenancy.py" = ["B017"]

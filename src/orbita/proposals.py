@@ -3,9 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC
 from importlib.resources import files
-from typing import Any, Callable, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from jsonschema import Draft202012Validator
 
@@ -13,7 +15,6 @@ from .models import (
     ActorRole,
     EvidenceKind,
     ObjectKind,
-    PredicateRangeKind,
     ProposalBatchStatus,
     ProposalItemStatus,
     ProposalItemType,
@@ -28,9 +29,9 @@ if False:  # pragma: no cover
 
 
 def _utcnow() -> str:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _new_id(prefix: str) -> str:
@@ -173,7 +174,7 @@ class ProposalAdapter:
 
     MAX_RESPONSE_BYTES = 1_000_000
 
-    def __init__(self, ledger: "EpistemicLedger") -> None:
+    def __init__(self, ledger: EpistemicLedger) -> None:
         self.ledger = ledger
         self.validator = Draft202012Validator(PROPOSAL_SCHEMA)
 
@@ -789,7 +790,7 @@ class ProposalAdapter:
             if not entity_type:
                 raise ValueError(
                     f"Unknown entity {name!r} lacks entity_type; cannot create it unambiguously"
-                )
+                ) from None
             return self.ledger.add_entity(
                 name,
                 entity_type=entity_type,

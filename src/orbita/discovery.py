@@ -5,12 +5,12 @@ import hashlib
 import json
 import math
 import random
-import statistics
-from urllib.parse import unquote, urlparse
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any
+from urllib.parse import unquote, urlparse
 
 from .execution import (
     ContainerExecutionRuntime,
@@ -20,13 +20,16 @@ from .execution import (
     ResourceLimits,
     StagedFile,
 )
-from .models import ActorRole, ObjectKind, SupportState
+from .models import ActorRole, ObjectKind
+
+if TYPE_CHECKING:
+    from .ledger import EpistemicLedger
 
 DISCOVERY_API_VERSION = "1.0"
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _stable_json(value: Any) -> str:
@@ -74,7 +77,7 @@ class DiscoveryBudget:
             raise ValueError("max_output_bytes is outside the supported range")
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any] | None) -> "DiscoveryBudget":
+    def from_dict(cls, value: dict[str, Any] | None) -> DiscoveryBudget:
         return cls(**(value or {}))
 
 
@@ -94,7 +97,7 @@ class HypothesisSeed:
             raise ValueError("Hypothesis seed requires two different columns")
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "HypothesisSeed":
+    def from_dict(cls, value: dict[str, Any]) -> HypothesisSeed:
         return cls(
             x=str(value["x"]),
             y=str(value["y"]),
@@ -165,7 +168,7 @@ class DiscoverySpec:
         object.__setattr__(self, "candidate_hypotheses", seeds)
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any], *, base_dir: str | Path | None = None) -> "DiscoverySpec":
+    def from_dict(cls, value: dict[str, Any], *, base_dir: str | Path | None = None) -> DiscoverySpec:
         base = Path(base_dir).resolve() if base_dir is not None else None
 
         def resolve(path_value: Any) -> Any:
@@ -226,7 +229,7 @@ class GovernedDiscoveryRuntime:
     supplied, receives a second manifest and independent evidence identity.
     """
 
-    def __init__(self, ledger: "EpistemicLedger", workspace: str | Path | None = None):
+    def __init__(self, ledger: EpistemicLedger, workspace: str | Path | None = None):
         self.ledger = ledger
         self.workspace = (
             Path(workspace).expanduser().resolve()
@@ -1123,7 +1126,7 @@ class GovernedDiscoveryRuntime:
         syy = math.fsum((y - my) ** 2 for y in ys)
         if sxx == 0 or syy == 0:
             return None
-        value = math.fsum((x - mx) * (y - my) for x, y in zip(xs, ys)) / math.sqrt(sxx * syy)
+        value = math.fsum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=False)) / math.sqrt(sxx * syy)
         return max(-1.0, min(1.0, value))
 
     # ------------------------------------------------------------------

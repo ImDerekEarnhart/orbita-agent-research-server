@@ -6,7 +6,6 @@ from typing import Any
 from .models import RiskLevel, SupportState
 from .support import SupportEngine
 
-
 RISK_COST = {
     RiskLevel.LOW: 0.5,
     RiskLevel.MEDIUM: 4.0,

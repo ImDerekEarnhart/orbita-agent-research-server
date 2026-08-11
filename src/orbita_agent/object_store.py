@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any, Iterator, Protocol
+from typing import IO, Any, Protocol
 
 
 class ObjectStoreError(RuntimeError):
