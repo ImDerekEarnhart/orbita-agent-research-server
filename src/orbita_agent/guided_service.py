@@ -316,6 +316,82 @@ def install_guided_service_routes(
         except Exception as exc:  # noqa: BLE001
             return failure(exc)
 
+    @mcp.custom_route(f"{GUIDED_API_PREFIX}/evidence", methods=["GET"], include_in_schema=False)
+    async def guided_normalized_evidence(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse({"receipts": bound(request).list_normalized_evidence()})
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(f"{GUIDED_API_PREFIX}/evidence/status", methods=["GET"], include_in_schema=False)
+    async def guided_evidence_status(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse(bound(request).evidence_normalization_status())
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/evidence/{{receipt_id}}", methods=["GET"], include_in_schema=False
+    )
+    async def guided_evidence_receipt(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse(bound(request).get_normalized_evidence(request.path_params["receipt_id"]))
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/evidence/{{receipt_id}}/verify", methods=["GET"], include_in_schema=False
+    )
+    async def guided_verify_evidence(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse(bound(request).verify_normalized_evidence(request.path_params["receipt_id"]))
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/evidence/{{receipt_id}}/eligibility", methods=["POST"], include_in_schema=False
+    )
+    async def guided_evidence_eligibility(request: Request) -> JSONResponse:
+        try:
+            body = await _json(request)
+            return JSONResponse(
+                bound(request).check_evidence_eligibility(
+                    request.path_params["receipt_id"], str(body.get("decision_kind") or "")
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/evidence/discovery-run", methods=["POST"], include_in_schema=False
+    )
+    async def guided_normalize_discovery_run(request: Request) -> JSONResponse:
+        try:
+            body = await _json(request)
+            return JSONResponse(
+                bound(request).normalize_discovery_run_evidence(
+                    str(body.get("case_id") or ""), str(body.get("run_id") or "")
+                ),
+                status_code=201,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/evidence/external-experiment", methods=["POST"], include_in_schema=False
+    )
+    async def guided_normalize_external_experiment(request: Request) -> JSONResponse:
+        try:
+            body = await _json(request)
+            return JSONResponse(
+                bound(request).normalize_external_experiment_evidence(
+                    str(body.get("experiment_id") or "")
+                ),
+                status_code=201,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
     @mcp.custom_route(f"{GUIDED_API_PREFIX}/problem-loops", methods=["GET", "POST"], include_in_schema=False)
     async def guided_problem_loops(request: Request) -> JSONResponse:
         try:

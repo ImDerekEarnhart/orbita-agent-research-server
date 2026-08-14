@@ -99,6 +99,13 @@ Existing single-owner deployments keep working with no variable changes. When ex
 disengages as soon as a second GitHub user is allowed, at which point explicit bindings become mandatory and the
 server refuses to start without them.
 
+## Normalized evidence
+
+Orbita 0.9 records route-specific evidence in a shared append-only receipt format without rewriting the original source.
+Eligibility is derived from a fixed source policy: a Genome tournament may support discovery-operator review, for example,
+but no evidence receipt can authorize admission, activation, promotion, architecture changes, or deployment. See
+`docs/EVIDENCE_NORMALIZATION.md`.
+
 ## Install
 
 Python 3.11 or newer is required.

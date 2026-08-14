@@ -50,6 +50,14 @@ def test_guided_surface_and_mcp_share_one_tenant_gateway(gateway, monkeypatch, s
         memory_status = client.get("/guided/v1/memory/status", headers=_headers())
         assert memory_status.status_code == 200
 
+        evidence_status = client.get("/guided/v1/evidence/status", headers=_headers())
+        assert evidence_status.status_code == 200
+        assert evidence_status.json()["activation_authority"] is False
+        assert "CODE_DEPLOYMENT" in evidence_status.json()["decision_kinds"]
+        evidence = client.get("/guided/v1/evidence", headers=_headers())
+        assert evidence.status_code == 200
+        assert evidence.json()["receipts"] == []
+
         compressed = client.post(
             "/guided/v1/compress/code",
             headers=_headers(),

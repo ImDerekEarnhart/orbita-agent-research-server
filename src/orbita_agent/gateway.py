@@ -20,6 +20,12 @@ from .blind_calibration import PREDICTION_KIND, BlindCalibrationService
 from .candidate_execution import CandidateExecutionLedger
 from .candidate_execution import content_hash as candidate_result_hash
 from .config import AgentConfig
+from .evidence_normalization import (
+    EvidenceReceiptLedger,
+    discovery_run_receipt_input,
+    external_experiment_receipt_input,
+    genome_tournament_receipt_input,
+)
 from .external_experiments import ExternalExperimentService
 from .general_problem_loop import GeneralProblemLoopService
 from .graph_adapter import analyze_graph, export_lean_certificate
@@ -70,6 +76,7 @@ class AgentGateway:
         )
         self.general_problem_loops = GeneralProblemLoopService(self.config.general_problem_loop_db)
         self.candidate_executions = CandidateExecutionLedger(self.config.candidate_execution_db)
+        self.evidence_receipts = EvidenceReceiptLedger(self.config.evidence_receipt_db)
         self.memory = MemoryIndex(self.config.memory_db)
         self.objects = build_object_store(self.config.home / "objects")
         self._lock = threading.RLock()
@@ -89,6 +96,7 @@ class AgentGateway:
             child.close()
         self.memory.close()
         self.candidate_executions.close()
+        self.evidence_receipts.close()
         self.general_problem_loops.close()
         self.blind_calibration.close()
         self.external_experiments.close()
@@ -133,6 +141,7 @@ class AgentGateway:
                 "typed capability-component graphs for archive synthesis",
                 "append-only General Problem Loops with hash-chained evidence and bounded retries",
                 "compile-time candidate-to-executor binding with append-only dispatch receipts",
+                "normalized append-only evidence receipts with decision-specific eligibility",
             ],
             "approval_phrase": APPROVAL_PHRASE,
             "deletion_phrase": DELETION_PHRASE,
@@ -156,6 +165,7 @@ class AgentGateway:
                 "registry": DEFAULT_EXECUTOR_REGISTRY.status(),
                 "ledger": self.candidate_executions.status(),
             },
+            "evidence_normalization": self.evidence_receipts.status(),
             "knowledge": knowledge,
             "boundaries": [
                 "Surviving a configured gauntlet is not universal proof, causality, or novelty.",
@@ -167,6 +177,7 @@ class AgentGateway:
                 "Language transitions create inert snapshots and receipts; they never patch or activate this runtime.",
                 "The General Problem Loop records executor receipts but cannot autonomously execute external actions.",
                 "Candidate kinds are never coerced into a different executor; missing grounding fails before approval.",
+                "Evidence receipts never grant semantic admission, activation, policy promotion, or deployment authority.",
                 "Deterministic execution integrity is reported separately from scientific validity.",
             ],
         }
@@ -1077,6 +1088,47 @@ class AgentGateway:
     def verify_candidate_execution_receipt(self, receipt_id: str) -> dict[str, Any]:
         with self._lock:
             return self.candidate_executions.verify(receipt_id)
+
+    def evidence_normalization_status(self) -> dict[str, Any]:
+        return self.evidence_receipts.status()
+
+    def list_normalized_evidence(self, *, limit: int = 25) -> list[dict[str, Any]]:
+        with self._lock:
+            return self.evidence_receipts.list(limit=limit)
+
+    def get_normalized_evidence(self, receipt_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.evidence_receipts.get(receipt_id)
+
+    def verify_normalized_evidence(self, receipt_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.evidence_receipts.verify(receipt_id)
+
+    def check_evidence_eligibility(self, receipt_id: str, decision_kind: str) -> dict[str, Any]:
+        with self._lock:
+            return self.evidence_receipts.check_decision(receipt_id, decision_kind)
+
+    def normalize_discovery_run_evidence(self, case_id: str, run_id: str) -> dict[str, Any]:
+        with self._lock:
+            case = self.service.store.get_case(case_id)
+            run = self.service.store.get_run(run_id)
+            if run.get("case_id") != case_id:
+                raise ValueError("discovery run does not belong to this case")
+            plan = self.service.store.get_plan(run["plan_id"])
+            return self.evidence_receipts.record(**discovery_run_receipt_input(case, run, plan))
+
+    def normalize_genome_tournament_evidence(
+        self, tournament_payload: dict[str, Any], entry_id: str
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.evidence_receipts.record(
+                **genome_tournament_receipt_input(tournament_payload, entry_id)
+            )
+
+    def normalize_external_experiment_evidence(self, experiment_id: str) -> dict[str, Any]:
+        with self._lock:
+            experiment = self.external_experiments.get(experiment_id)
+            return self.evidence_receipts.record(**external_experiment_receipt_input(experiment))
 
     def get_plan(self, plan_id: str) -> dict[str, Any]:
         with self._lock:

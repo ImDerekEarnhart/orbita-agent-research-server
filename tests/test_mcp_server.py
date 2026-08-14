@@ -49,6 +49,14 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
         "orbita_list_candidate_execution_receipts",
         "orbita_get_candidate_execution_receipt",
         "orbita_verify_candidate_execution_receipt",
+        "orbita_evidence_normalization_status",
+        "orbita_list_normalized_evidence",
+        "orbita_get_normalized_evidence",
+        "orbita_verify_normalized_evidence",
+        "orbita_check_evidence_eligibility",
+        "orbita_normalize_discovery_run_evidence",
+        "orbita_normalize_genome_tournament_evidence",
+        "orbita_normalize_external_experiment_evidence",
         "orbita_approve_plan",
         "orbita_run_discovery",
         "orbita_blind_calibration_status",
@@ -130,6 +138,14 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
     assert tools["orbita_list_candidate_execution_receipts"].annotations.readOnlyHint is True
     assert tools["orbita_get_candidate_execution_receipt"].annotations.readOnlyHint is True
     assert tools["orbita_verify_candidate_execution_receipt"].annotations.readOnlyHint is True
+    assert tools["orbita_evidence_normalization_status"].annotations.readOnlyHint is True
+    assert tools["orbita_list_normalized_evidence"].annotations.readOnlyHint is True
+    assert tools["orbita_get_normalized_evidence"].annotations.readOnlyHint is True
+    assert tools["orbita_verify_normalized_evidence"].annotations.readOnlyHint is True
+    assert tools["orbita_check_evidence_eligibility"].annotations.readOnlyHint is True
+    assert tools["orbita_normalize_discovery_run_evidence"].annotations.destructiveHint is False
+    assert tools["orbita_normalize_genome_tournament_evidence"].annotations.destructiveHint is False
+    assert tools["orbita_normalize_external_experiment_evidence"].annotations.destructiveHint is False
     assert tools["orbita_approve_plan"].annotations.destructiveHint is True
     assert tools["orbita_run_discovery"].annotations.destructiveHint is True
     assert tools["orbita_promote_improvement"].annotations.destructiveHint is True
@@ -171,7 +187,7 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
 
 def test_runtime_version_metadata_matches_package(gateway, monkeypatch):
     monkeypatch.setattr(gateway.knowledge, "status", lambda: {})
-    assert gateway.capabilities()["version"] == __version__ == "0.8.0"
+    assert gateway.capabilities()["version"] == __version__ == "0.9.0"
 
 
 def test_capabilities_executes_through_the_real_mcp_surface(gateway, monkeypatch):

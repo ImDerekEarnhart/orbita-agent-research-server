@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0 - 2026-08-14
+
+- Added append-only normalized evidence receipts with exact source, scope, result, evaluator, independence, provenance,
+  normalization, and receipt hashes.
+- Added source-aware adapters for completed discovery runs, frozen evaluated Discovery Genome entries, and succeeded
+  integrity-verified external experiments.
+- Added a fixed decision-eligibility policy. Evidence can support bounded review categories but can never authorize
+  semantic admission/activation, policy promotion, code deployment, or architecture activation.
+- Added MCP and Guided read/normalization surfaces, tenant isolation, idempotent exact-source handling, immutable storage,
+  and adversarial hash/independence/authority tests.
+
 ## 0.8.0 - 2026-08-14
 
 - Added a unified candidate execution registry with immutable, hash-bound executor contracts.

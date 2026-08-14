@@ -61,9 +61,9 @@ deploy itself.
 | Independent verification | `src/orbita/execution.py` receipt/artifact verification; Language Tower `check_claims_*.py`; Guided Genome integrity tests | Multiple verifier families exist, but verifier identity, independence, scope, and eligibility are not normalized across routes. |
 | Architecture/code improvement | `src/orbita/coding.py` and its exact approval, promotion, verification, and rollback paths | Useful governance infrastructure exists. It is not evidence of recursively discovered architecture improvement and is not connected to a capability-delta benchmark. |
 
-## Why Genome evidence does not currently enter the policy learner
+## Genome evidence accounting after the first implementation slice
 
-This is an interface mismatch, not an evidence-quality judgment.
+The original gap was an interface mismatch, not an evidence-quality judgment.
 
 - `ImprovementLab._benchmarks()` in `src/orbita_agent/improvement.py` reads only local cases containing a `completed`
   discovery run and replays their frozen plan inputs.
@@ -71,11 +71,15 @@ This is an interface mismatch, not an evidence-quality judgment.
   `src/orbita_agent/genome_client.py`.
 - A Genome result has operator, prediction, manifest, result, and independence data, but it is not a local completed case
   run and therefore cannot satisfy `_benchmarks()`.
-- No shared object states which hashes are exact, what was frozen before reveal, what scope was tested, how independent
-  the evaluator was, or which downstream decision categories the receipt may support.
+- `src/orbita_agent/evidence_normalization.py` now supplies that shared object for actual completed discovery runs, actual
+  frozen/evaluated Genome entries, and actual succeeded integrity-verified external experiments.
+- Genome evidence can now become an immutable receipt eligible for `DISCOVERY_OPERATOR_REVIEW`; the fixed policy proves
+  that the same receipt is ineligible for semantic admission/activation, policy promotion, code deployment, and
+  architecture activation.
+- `ImprovementLab._benchmarks()` remains unchanged and does not silently treat Genome evidence as a table-discovery run.
 
-The correct repair is a normalized, append-only evidence interface with category-specific eligibility rules. Converting a
-Genome survivor into a fake completed table-discovery run would destroy provenance and is prohibited.
+Converting a Genome survivor into a fake completed table-discovery run remains prohibited. The remaining integration is a
+category-aware consumer for eligible review evidence, not a relaxation of `_benchmarks()`.
 
 ## Five required first-class objects
 
@@ -92,7 +96,7 @@ Genome survivor into a fake completed table-discovery run would destroy provenan
 | Milestone | Status | Exact evidence and missing interface |
 |---|---|---|
 | **A — Audit current implementation** | **PRESENT** | This document maps MCP, Language Tower, ORB-L, Genome, DerekX-like execution, verifiers, and benchmarks to exact files and interfaces. |
-| **B — Evidence normalization** | **PARTIAL** | `src/orbita/epistemic_contract.py` has evidence status, coverage, scope normalization, and scope-escalation guards; run evidence, Genome receipts, external-experiment receipts, and checker receipts are hash-bound in separate stores. Missing: first-class `EvidenceReceipt`, `EvidenceScope`, `EvidenceIndependence`, and `EvidenceEligibility`, adapters for each source, and decision-specific eligibility policy. |
+| **B — Evidence normalization** | **PARTIAL** | `src/orbita_agent/evidence_normalization.py` now provides immutable `EvidenceReceipt`, scope, independence, and fixed eligibility objects plus adapters for completed discovery runs, frozen/evaluated Genome entries, and succeeded integrity-verified external experiments. MCP and Guided expose tenant-scoped normalize/read/verify/check operations. Missing: trusted source-store adapters for proof assistants and standalone independent verifiers, plus a category-aware ORB-L review consumer. |
 | **C — LanguageSnapshot v1** | **PARTIAL** | Canonical inert snapshot builder exists in `semantic_evolution.py`. Missing persistent immutable registry, full runtime identity, reconstruction, and executable-registry verification. |
 | **D — Language Limit Kernel** | **PARTIAL** | Exact finite equivalence partition, collision witness, and candidate overseparation exist. Language Tower `CERT` and `INVARIANCE` preserve stronger domain-specific precedents. Missing shared `check_factorization`, transformation invariance, constructor closure, exact gap, and lower-bound APIs. |
 | **E — Autonomous Failure Classifier** | **PARTIAL** | `GeneralProblemLoopService` validates caller-declared `SEARCH_FAILURE`, `LANGUAGE_LIMIT`, `MODEL_LIMIT`, and `EXECUTION_LIMIT`; the new dispatcher emits typed `ENGINE_CAPABILITY_LIMIT`. Missing `tower.meta.diagnose_failure(task_receipt)` and unprompted classification across all manifesto classes. |
@@ -133,16 +137,15 @@ scaffolded, but no later stage is complete:
 
 ## Smallest next vertical slice
 
-Implement **Evidence Normalization v1** without changing any existing evidence row or weakening any route:
+Finish **Evidence Normalization v1** without changing any existing evidence row or weakening any route:
 
-1. immutable `EvidenceReceipt` plus hash verification;
-2. explicit `EvidenceScope`, `EvidenceIndependence`, and `EvidenceEligibility` schemas;
-3. read-only adapters for completed discovery runs, Genome tournament results, external experiments, proof/checker receipts,
-   and independent verifiers;
-4. a policy matrix that states which evidence source may support which decision category;
-5. negative controls proving that Genome survival cannot authorize deployment, unverified evidence is ineligible, changed
-   hashes fail closed, same-source evidence cannot claim external independence, and legacy records remain untouched;
-6. no automatic admission, transition, activation, promotion, rollback, or deployment operation.
+1. **Implemented:** immutable receipt, scope, independence, eligibility, normalization, and receipt hash verification.
+2. **Implemented:** actual-record adapters for discovery runs, Genome results, and external experiments.
+3. **Implemented:** fixed source-to-decision policy plus negative controls for deployment/activation denial, unverified
+   evidence, changed hashes, false external independence, immutability, idempotence, and tenant isolation.
+4. **Still required:** trustworthy source-store adapters for proof-assistant and standalone verifier receipts.
+5. **Still required:** a read-only ORB-L review input that consumes only eligible receipt hashes without admitting anything.
+6. **Still prohibited:** automatic admission, transition, activation, promotion, rollback, or deployment.
 
 Only after this slice passes should `LanguageSnapshot v1` be expanded into a persistent reconstructable semantic identity.
 
@@ -150,8 +153,8 @@ Only after this slice passes should `LanguageSnapshot v1` be expanded into a per
 
 Strongest justified claim:
 
-> Orbita has a deployed, governed executor boundary and a tested finite semantic-repair substrate that can create inert,
-> hash-bound language artifacts while preserving human activation authority.
+> Orbita has a governed executor boundary, a tested finite semantic-repair substrate, and an additive normalized-evidence
+> ledger that preserves source scope and prevents evidence from becoming activation authority.
 
 Strongest prohibited overclaim:
 

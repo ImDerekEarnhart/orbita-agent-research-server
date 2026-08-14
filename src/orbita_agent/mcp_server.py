@@ -1409,6 +1409,49 @@ def build_mcp_server(
         return _gateway_for_caller().verify_candidate_execution_receipt(receipt_id)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_evidence_normalization_status() -> dict[str, Any]:
+        """Show evidence source adapters, fixed decision eligibility, and the no-activation boundary."""
+        return _gateway_for_caller().evidence_normalization_status()
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_list_normalized_evidence(limit: int = 25) -> list[dict[str, Any]]:
+        """List append-only normalized evidence receipts for this tenant."""
+        return _gateway_for_caller().list_normalized_evidence(limit=limit)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_get_normalized_evidence(receipt_id: str) -> dict[str, Any]:
+        """Fetch one exact normalized evidence receipt, scope, independence, and eligibility result."""
+        return _gateway_for_caller().get_normalized_evidence(receipt_id)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_verify_normalized_evidence(receipt_id: str) -> dict[str, Any]:
+        """Recompute a normalized evidence receipt, scope, independence, and fixed eligibility policy."""
+        return _gateway_for_caller().verify_normalized_evidence(receipt_id)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_check_evidence_eligibility(receipt_id: str, decision_kind: str) -> dict[str, Any]:
+        """Check whether one receipt may support a declared review; never grants admission or activation."""
+        return _gateway_for_caller().check_evidence_eligibility(receipt_id, decision_kind)
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_normalize_discovery_run_evidence(case_id: str, run_id: str) -> dict[str, Any]:
+        """Create an immutable evidence receipt from an actual completed local discovery run."""
+        return _gateway_for_caller().normalize_discovery_run_evidence(case_id, run_id)
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_normalize_genome_tournament_evidence(
+        tournament_id: str, entry_id: str
+    ) -> dict[str, Any]:
+        """Fetch an actual frozen Genome result and normalize it for operator review only."""
+        payload = _genome_for_caller().get_tournament(tournament_id)
+        return _gateway_for_caller().normalize_genome_tournament_evidence(payload, entry_id)
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_normalize_external_experiment_evidence(experiment_id: str) -> dict[str, Any]:
+        """Normalize an actual succeeded, integrity-verified governed external experiment."""
+        return _gateway_for_caller().normalize_external_experiment_evidence(experiment_id)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_get_plan(plan_id: str) -> dict[str, Any]:
         """Fetch the complete immutable plan and its SHA-256 hash for review."""
         return _gateway_for_caller().get_plan(plan_id)
