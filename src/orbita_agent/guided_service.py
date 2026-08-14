@@ -398,6 +398,24 @@ def install_guided_service_routes(
             return failure(exc)
 
     @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/cases/{{case_id}}/plans", methods=["POST"], include_in_schema=False
+    )
+    async def guided_submit_plan(request: Request) -> JSONResponse:
+        try:
+            body = await _json(request)
+            plan = body.get("plan")
+            if not isinstance(plan, dict):
+                raise GuidedServiceError(400, "plan must be a JSON object")
+            record = bound(request).submit_plan(
+                request.path_params["case_id"],
+                plan=plan,
+                compiler=str(body.get("compiler") or "guided-hybrid"),
+            )
+            return JSONResponse(record | {"plan_id": record["id"]}, status_code=201)
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
         f"{GUIDED_API_PREFIX}/cases/{{case_id}}/compile", methods=["POST"], include_in_schema=False
     )
     async def guided_compile(request: Request) -> JSONResponse:
@@ -446,6 +464,116 @@ def install_guided_service_routes(
                 plan_id=str(body.get("plan_id") or ""),
             )
             return JSONResponse(run | {"run_id": run["id"]})
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/blind/{{protocol_id}}", methods=["GET"], include_in_schema=False
+    )
+    async def guided_blind_protocol(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse(
+                bound(request).get_blind_calibration(request.path_params["protocol_id"])
+            )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/blind/{{protocol_id}}/batch",
+        methods=["GET"],
+        include_in_schema=False,
+    )
+    async def guided_blind_batch(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse(
+                bound(request).get_blind_prediction_batch(request.path_params["protocol_id"])
+            )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/blind/{{protocol_id}}/predictions",
+        methods=["POST"],
+        include_in_schema=False,
+    )
+    async def guided_blind_predictions(request: Request) -> JSONResponse:
+        try:
+            body = await _json(request)
+            return JSONResponse(
+                bound(request).freeze_blind_predictions(
+                    request.path_params["protocol_id"],
+                    expected_protocol_hash=str(body.get("expected_protocol_hash") or ""),
+                    predictions=body.get("predictions"),
+                    provider=body.get("provider"),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/blind/{{protocol_id}}/scoring-key",
+        methods=["POST"],
+        include_in_schema=False,
+    )
+    async def guided_blind_scoring_key(request: Request) -> JSONResponse:
+        try:
+            body = await _json(request)
+            return JSONResponse(
+                bound(request).seal_blind_scoring_key(
+                    request.path_params["protocol_id"],
+                    expected_protocol_hash=str(body.get("expected_protocol_hash") or ""),
+                    expected_prediction_freeze_hash=str(
+                        body.get("expected_prediction_freeze_hash") or ""
+                    ),
+                    filename=str(body.get("filename") or "scoring-key.csv"),
+                    content=str(body.get("content") or ""),
+                    sealed_by=str(body.get("sealed_by") or "guided-user"),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/blind/{{protocol_id}}/reveal",
+        methods=["POST"],
+        include_in_schema=False,
+    )
+    async def guided_blind_reveal(request: Request) -> JSONResponse:
+        try:
+            body = await _json(request)
+            return JSONResponse(
+                bound(request).approve_blind_reveal(
+                    request.path_params["protocol_id"],
+                    expected_protocol_hash=str(body.get("expected_protocol_hash") or ""),
+                    expected_prediction_freeze_hash=str(
+                        body.get("expected_prediction_freeze_hash") or ""
+                    ),
+                    expected_scoring_key_hash=str(body.get("expected_scoring_key_hash") or ""),
+                    reviewer=str(body.get("reviewer") or "guided-user"),
+                    rationale=str(body.get("rationale") or ""),
+                    confirmation=str(body.get("confirmation") or ""),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/blind/{{protocol_id}}/score",
+        methods=["POST"],
+        include_in_schema=False,
+    )
+    async def guided_blind_score(request: Request) -> JSONResponse:
+        try:
+            body = await _json(request)
+            return JSONResponse(
+                bound(request).score_blind_calibration(
+                    request.path_params["protocol_id"],
+                    expected_prediction_freeze_hash=str(
+                        body.get("expected_prediction_freeze_hash") or ""
+                    ),
+                    expected_scoring_key_hash=str(body.get("expected_scoring_key_hash") or ""),
+                )
+            )
         except Exception as exc:  # noqa: BLE001
             return failure(exc)
 

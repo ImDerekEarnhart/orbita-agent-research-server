@@ -15,6 +15,7 @@ from orbita_mvp import ResearchMVP
 
 from . import __version__
 from .archive_policy import ArchivePolicy
+from .blind_calibration import PREDICTION_KIND, BlindCalibrationService
 from .config import AgentConfig
 from .external_experiments import ExternalExperimentService
 from .graph_adapter import analyze_graph, export_lean_certificate
@@ -58,6 +59,11 @@ class AgentGateway:
             self.config.execution_workspace,
             self.service,
         )
+        self.blind_calibration = BlindCalibrationService(
+            self.config.blind_prediction_db,
+            self.config.blind_scoring_db,
+            self.service,
+        )
         self.memory = MemoryIndex(self.config.memory_db)
         self.objects = build_object_store(self.config.home / "objects")
         self._lock = threading.RLock()
@@ -76,6 +82,7 @@ class AgentGateway:
         for child in children:
             child.close()
         self.memory.close()
+        self.blind_calibration.close()
         self.external_experiments.close()
         self.improvement_registry.close()
         self.improvements.close()
@@ -113,6 +120,7 @@ class AgentGateway:
                 "curated research-memory search",
                 "bounded graph analysis and Lean finite-certificate export",
                 "frozen deterministic external experiments with independent verification",
+                "prospective blind calibration with prediction-before-reveal scoring",
             ],
             "approval_phrase": APPROVAL_PHRASE,
             "deletion_phrase": DELETION_PHRASE,
@@ -130,6 +138,7 @@ class AgentGateway:
             },
             "archive_processing": self.service.ingestor.describe(),
             "external_experiments": self.external_experiments.status(),
+            "blind_calibration": self.blind_calibration.status(),
             "knowledge": knowledge,
             "boundaries": [
                 "Surviving a configured gauntlet is not universal proof, causality, or novelty.",
@@ -1013,8 +1022,99 @@ class AgentGateway:
                 raise ValueError("The plan does not belong to this case")
             if plan["status"] != "approved":
                 raise ValueError("The exact plan must be approved before execution")
+            kinds = {candidate.get("kind") for candidate in plan["plan"].get("candidates", [])}
+            if PREDICTION_KIND in kinds:
+                if kinds != {PREDICTION_KIND}:
+                    raise ValueError(
+                        "prospective blind calibration cannot share a plan with ordinary discovery candidates"
+                    )
+                return self.blind_calibration.prepare_from_approved_plan(case_id, plan_id)
             run = self.service.run_case(case_id, plan_id=plan_id, auto_approve=False)
             return self._run_view(run, include_findings=True)
+
+    def blind_calibration_status(self) -> dict[str, Any]:
+        with self._lock:
+            return self.blind_calibration.status()
+
+    def get_blind_calibration(self, protocol_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.blind_calibration.get(protocol_id)
+
+    def get_blind_prediction_batch(self, protocol_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.blind_calibration.prediction_batch(protocol_id)
+
+    def freeze_blind_predictions(
+        self,
+        protocol_id: str,
+        *,
+        expected_protocol_hash: str,
+        predictions: list[dict[str, Any]],
+        provider: dict[str, Any],
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.blind_calibration.freeze_predictions(
+                protocol_id,
+                expected_protocol_hash=expected_protocol_hash,
+                predictions=predictions,
+                provider=provider,
+            )
+
+    def seal_blind_scoring_key(
+        self,
+        protocol_id: str,
+        *,
+        expected_protocol_hash: str,
+        expected_prediction_freeze_hash: str,
+        filename: str,
+        content: str,
+        sealed_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.blind_calibration.seal_scoring_key(
+                protocol_id,
+                expected_protocol_hash=expected_protocol_hash,
+                expected_prediction_freeze_hash=expected_prediction_freeze_hash,
+                filename=filename,
+                content=content,
+                sealed_by=sealed_by,
+            )
+
+    def approve_blind_reveal(
+        self,
+        protocol_id: str,
+        *,
+        expected_protocol_hash: str,
+        expected_prediction_freeze_hash: str,
+        expected_scoring_key_hash: str,
+        reviewer: str,
+        rationale: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.blind_calibration.approve_reveal(
+                protocol_id,
+                expected_protocol_hash=expected_protocol_hash,
+                expected_prediction_freeze_hash=expected_prediction_freeze_hash,
+                expected_scoring_key_hash=expected_scoring_key_hash,
+                reviewer=reviewer,
+                rationale=rationale,
+                confirmation=confirmation,
+            )
+
+    def score_blind_calibration(
+        self,
+        protocol_id: str,
+        *,
+        expected_prediction_freeze_hash: str,
+        expected_scoring_key_hash: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.blind_calibration.score(
+                protocol_id,
+                expected_prediction_freeze_hash=expected_prediction_freeze_hash,
+                expected_scoring_key_hash=expected_scoring_key_hash,
+            )
 
     @staticmethod
     def _run_view(run: dict[str, Any], *, include_findings: bool, offset: int = 0, limit: int = 50) -> dict[str, Any]:

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.5.0 — 2026-08-13
+
+- Added provider-neutral `prospective_blind_calibration` as a separate governed execution route.
+- Added sanitized row batches, strict output vocabularies, forbidden-output validation, and one prediction per event.
+- Added immutable SHA-256 prediction freezes before any scoring-key intake is possible.
+- Added a separate tenant-scoped sealed-key store, exact-hash reveal approval, and immutable score receipts.
+- Added primary-label accuracy, confidence calibration error, and optional hypothesis-hit scoring.
+- Exposed the complete workflow through both MCP tools and Guided HTTP routes.
+- Added UAP-shaped leakage, holdout, row-materialization, vocabulary, and ten-row acceptance tests.
+
+## 0.4.0 — 2026-08-13
+
+- Unified MCP and Guided workflows over one tenant-scoped core.
+- Added generalized inactive improvement candidates and deterministic external experiments.
+- Added explicit evidence status, claim scope, falsification coverage, coverage repair, and re-examination propagation.
+
 - Replaced the single-principal Discovery Genome collapse with per-request tenant resolution from the authenticated
   OAuth subject. `ORBITA_DISCOVERY_GENOME_USERNAME` is no longer a deployment-wide tenant.
 - Added a persistent tenant registry (`orbita_tenants.db`) mapping authenticated subject to Guided UI username, with

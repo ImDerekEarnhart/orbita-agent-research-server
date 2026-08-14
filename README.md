@@ -1,4 +1,4 @@
-# Orbita Agent Research Server v0.4.0
+# Orbita Agent Research Server v0.5.0
 
 Orbita Agent Research Server is a local, MCP-native research system for people and AI agents. It turns supplied data into an explicit analysis plan, freezes that plan before confirmation scoring, runs bounded falsification checks, and stores both survivors and failures in persistent epistemic memory.
 
@@ -233,6 +233,29 @@ appends a downgraded evidence state, and opens re-examination work for those cla
 `orbita_propagate_external_coverage_bug_to_claims` tool safely retries this cross-database projection without creating
 duplicate history.
 
+## Prospective blind calibration
+
+Plans containing exactly one `prospective_blind_calibration` candidate use a separate prediction-before-reveal
+workflow instead of the ordinary association scorer. The plan freezes the sanitized blind input, visible fields,
+allowed hypotheses, epistemic labels, evidence classes, forbidden outputs, prediction-provider policy, and scoring
+schema. The prediction provider can be an LLM, another model, a deterministic ruleset, or a human process, but its
+identity is stored in the immutable prediction receipt.
+
+The workflow enforces this order:
+
+1. prepare the protocol from an exact approved plan and a sanitized row-level input;
+2. expose only the visible rows and frozen output vocabulary;
+3. validate and freeze exactly one prediction per row with a SHA-256 receipt;
+4. accept a separate scoring key only after prediction freeze;
+5. require exact protocol, prediction, and scoring-key hashes plus explicit reveal approval; and
+6. score the immutable predictions, preserving row-level accuracy, hypothesis hits, and calibration error.
+
+Declared scoring-key or unresolved-holdout fields are rejected if they occur in the blind input. Scoring-key contents
+live in a separate tenant-scoped database and are never returned by the prediction batch or ordinary status tools.
+This protocol is domain-neutral: UAP event calibration, medical cases, materials failure, hardware faults, biology,
+and AI-safety labels use the same governed machinery. See
+[`docs/PROSPECTIVE_BLIND_CALIBRATION.md`](docs/PROSPECTIVE_BLIND_CALIBRATION.md).
+
 The lab cannot edit source, invoke a shell, deploy, or activate its own proposal. New plans record the active policy
 ID, version, hash, and whether the caller overrode the candidate budget.
 
@@ -246,6 +269,7 @@ The exact approval phrase is reported by `orbita_capabilities`; clients should n
 - Graph theory: preserved finite-run summaries, near misses, bounded graph analysis, and Lean witness export.
 - Improvement: history-derived proposals, deterministic benchmark replay, policy activation, and rollback.
 - External experiments: scope-preserving deterministic execution with exact approval and independent verification.
+- Blind calibration: sanitized prediction batches, immutable prediction freezes, sealed gold keys, and approved reveal.
 
 ## Scientific boundaries
 

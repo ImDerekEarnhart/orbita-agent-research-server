@@ -34,6 +34,13 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
         "orbita_compile_plan",
         "orbita_approve_plan",
         "orbita_run_discovery",
+        "orbita_blind_calibration_status",
+        "orbita_get_blind_calibration",
+        "orbita_get_blind_prediction_batch",
+        "orbita_freeze_blind_predictions",
+        "orbita_seal_blind_scoring_key",
+        "orbita_approve_blind_reveal",
+        "orbita_score_blind_calibration",
         "orbita_claim_history",
         "orbita_search_knowledge",
         "orbita_analyze_graph",
@@ -119,11 +126,18 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
     assert tools["orbita_genome_freeze_tournament"].annotations.destructiveHint is True
     assert tools["orbita_genome_record_result"].annotations.destructiveHint is True
     assert tools["orbita_approve_plan"].description
+    assert tools["orbita_blind_calibration_status"].annotations.readOnlyHint is True
+    assert tools["orbita_get_blind_calibration"].annotations.readOnlyHint is True
+    assert tools["orbita_get_blind_prediction_batch"].annotations.destructiveHint is False
+    assert tools["orbita_freeze_blind_predictions"].annotations.destructiveHint is False
+    assert tools["orbita_seal_blind_scoring_key"].annotations.destructiveHint is False
+    assert tools["orbita_approve_blind_reveal"].annotations.destructiveHint is True
+    assert tools["orbita_score_blind_calibration"].annotations.destructiveHint is True
 
 
 def test_runtime_version_metadata_matches_package(gateway, monkeypatch):
     monkeypatch.setattr(gateway.knowledge, "status", lambda: {})
-    assert gateway.capabilities()["version"] == __version__ == "0.4.0"
+    assert gateway.capabilities()["version"] == __version__ == "0.5.0"
 
 
 def test_capabilities_executes_through_the_real_mcp_surface(gateway, monkeypatch):

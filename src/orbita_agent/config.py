@@ -48,6 +48,14 @@ class AgentConfig:
         return self.home / "orbita_external_experiments.db"
 
     @property
+    def blind_prediction_db(self) -> Path:
+        return self.home / "orbita_blind_predictions.db"
+
+    @property
+    def blind_scoring_db(self) -> Path:
+        return self.home / "orbita_blind_scoring.db"
+
+    @property
     def epistemic_db(self) -> Path:
         return self.home / "orbita_epistemic.db"
 

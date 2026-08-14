@@ -1255,8 +1255,91 @@ def build_mcp_server(
 
     @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
     def orbita_run_discovery(case_id: str, plan_id: str) -> dict[str, Any]:
-        """Execute an already approved plan and persist findings, failed checks, claims, and reports."""
+        """Execute an approved plan, or prepare its governed blind-prediction protocol when declared."""
         return _gateway_for_caller().run_discovery(case_id, plan_id=plan_id)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_blind_calibration_status() -> dict[str, Any]:
+        """Describe prediction-before-reveal governance and the exact reveal approval phrase."""
+        return _gateway_for_caller().blind_calibration_status()
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_get_blind_calibration(protocol_id: str) -> dict[str, Any]:
+        """Read protocol hashes, freeze state, sealed-key receipt, reveal approval, and score receipt."""
+        return _gateway_for_caller().get_blind_calibration(protocol_id)
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_get_blind_prediction_batch(protocol_id: str) -> dict[str, Any]:
+        """Read sanitized visible rows and prediction vocabularies; scoring keys are unavailable here."""
+        return _gateway_for_caller().get_blind_prediction_batch(protocol_id)
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_freeze_blind_predictions(
+        protocol_id: str,
+        expected_protocol_hash: str,
+        predictions: list[dict[str, Any]],
+        provider: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Validate one prediction per blind row and permanently freeze the exact payload hash."""
+        return _gateway_for_caller().freeze_blind_predictions(
+            protocol_id,
+            expected_protocol_hash=expected_protocol_hash,
+            predictions=predictions,
+            provider=provider,
+        )
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_seal_blind_scoring_key(
+        protocol_id: str,
+        expected_protocol_hash: str,
+        expected_prediction_freeze_hash: str,
+        filename: str,
+        content: str,
+        sealed_by: str,
+    ) -> dict[str, Any]:
+        """Seal a separate gold table only after predictions are frozen; contents remain hidden."""
+        return _gateway_for_caller().seal_blind_scoring_key(
+            protocol_id,
+            expected_protocol_hash=expected_protocol_hash,
+            expected_prediction_freeze_hash=expected_prediction_freeze_hash,
+            filename=filename,
+            content=content,
+            sealed_by=sealed_by,
+        )
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_approve_blind_reveal(
+        protocol_id: str,
+        expected_protocol_hash: str,
+        expected_prediction_freeze_hash: str,
+        expected_scoring_key_hash: str,
+        reviewer: str,
+        rationale: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        """Authorize reveal only for the exact protocol, prediction freeze, and sealed scoring-key hashes."""
+        return _gateway_for_caller().approve_blind_reveal(
+            protocol_id,
+            expected_protocol_hash=expected_protocol_hash,
+            expected_prediction_freeze_hash=expected_prediction_freeze_hash,
+            expected_scoring_key_hash=expected_scoring_key_hash,
+            reviewer=reviewer,
+            rationale=rationale,
+            confirmation=confirmation,
+        )
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_score_blind_calibration(
+        protocol_id: str,
+        expected_prediction_freeze_hash: str,
+        expected_scoring_key_hash: str,
+    ) -> dict[str, Any]:
+        """Score immutable predictions against the exact separately approved sealed key."""
+        return _gateway_for_caller().score_blind_calibration(
+            protocol_id,
+            expected_prediction_freeze_hash=expected_prediction_freeze_hash,
+            expected_scoring_key_hash=expected_scoring_key_hash,
+        )
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_get_run(run_id: str, findings_offset: int = 0, findings_limit: int = 50) -> dict[str, Any]:

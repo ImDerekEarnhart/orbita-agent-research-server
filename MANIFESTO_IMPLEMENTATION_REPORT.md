@@ -1,6 +1,6 @@
 # Orbita Manifesto Implementation Report
 
-Date: 2026-08-13
+Date: 2026-08-14
 Pass: Phase 0 / first P0 vertical slice
 Deployment: unified staging release candidate
 Active policy change: none
@@ -29,6 +29,7 @@ This report covers the first-pass definition of done from `ORBITA_PRODUCT_SELF_I
 | Legacy policy migration plan | audit | legacy improvement suite | IMPLEMENTED | Plan is read-only adaptation; existing hashes and activation flow remain authoritative. |
 | Evidence taxonomy and claim scope | `src/orbita/epistemic_contract.py`, Guided memory/service/reporting, gateway/MCP | `tests/test_epistemic_contract.py`, Guided service tests | IMPLEMENTED | Central evidence taxonomy, normalized claim scope, append-only epistemic events, and fail-closed scope escalation now protect legacy Guided discovery. Existing claim workflow statuses remain compatible but are no longer treated as evidence labels. |
 | Falsification coverage and coverage-bug objects | external experiment service plus Guided epistemic contracts and re-examination bridge | external experiment and epistemic-contract tests | IMPLEMENTED | Every new Guided finding records normalized coverage and untested regions. Validated external bugs freeze affected claim bindings, append `REFUTED`/`PROVISIONAL` epistemic events, update claim workflow status, and queue the full dependency blast radius. Projection is idempotently retryable. |
+| Prospective blind calibration | `src/orbita_agent/blind_calibration.py`, gateway, MCP, Guided routes | `tests/test_blind_calibration.py`, Guided/MCP suites | IMPLEMENTED | Domain-neutral sanitized row batches, provider receipts, immutable prediction freezes, post-freeze sealed gold keys, exact-hash reveal approval, and immutable calibration scores. Prediction surfaces never return scoring-key contents. |
 | Data partition contamination ledger | manifesto audit | Existing scout/holdout tests | PARTIAL | Existing scout/confirmation separation remains; universal access-ledger enforcement is not yet implemented. |
 | Representation engine and formal certificates | manifesto audit | language-limit fail-closed test | PARTIAL | Certificate admission is fail-closed; representation depth, transformation hunter, grammar proofs, SMT, and ORB-1 adapters remain future phases. |
 | Interpretation/selectivity/novelty competition | manifesto audit | none in this slice | PARTIAL | No automatic interpretation promotion was added. `NONE_OF_THE_ABOVE`, E13/E14 selectivity, and novelty review require later work. |
@@ -38,6 +39,13 @@ This report covers the first-pass definition of done from `ORBITA_PRODUCT_SELF_I
 
 - `orbita_governed_improvement_status`
 - `orbita_guard_claim_scope`
+- `orbita_blind_calibration_status`
+- `orbita_get_blind_calibration`
+- `orbita_get_blind_prediction_batch`
+- `orbita_freeze_blind_predictions`
+- `orbita_seal_blind_scoring_key`
+- `orbita_approve_blind_reveal`
+- `orbita_score_blind_calibration`
 - `orbita_register_improvement_candidate`
 - `orbita_list_governed_improvements`
 - `orbita_get_governed_improvement`
@@ -68,7 +76,7 @@ There is intentionally no generalized approve, promote, merge, deploy, or rollba
 
 - Focused claim-contract/MCP/Guided suite: 55 passed, one third-party deprecation warning.
 - Focused lint: passed.
-- Full suite: 313 passed, with one unrelated third-party Starlette/httpx deprecation warning.
+- Full suite: 319 passed, with one unrelated third-party Starlette/httpx deprecation warning.
 - Repository-wide lint: passed.
 
 ## Next exact slice

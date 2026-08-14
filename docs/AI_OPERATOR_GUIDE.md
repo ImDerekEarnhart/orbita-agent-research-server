@@ -101,3 +101,16 @@ When a validated external coverage bug affects existing Guided claims, pass thei
 Orbita will challenge or reject those claims according to `claim_effect` and queue dependent claims for review. If the
 initial projection is interrupted, call `orbita_propagate_external_coverage_bug_to_claims` with the exact replacement
 protocol hash; the operation is idempotent.
+
+## Prospective blind calibration
+
+Use `prospective_blind_calibration` only with a sanitized input artifact that contains no declared scoring-key or
+unresolved-holdout fields. Freeze a nonempty scoring schema, output vocabularies, forbidden outputs, and one declared
+prediction-provider kind in the plan. After plan approval, `orbita_run_discovery` prepares the blind protocol instead
+of invoking the association engine. Retrieve visible rows with `orbita_get_blind_prediction_batch`, then submit one
+schema-valid prediction per event through `orbita_freeze_blind_predictions`.
+
+Do not request or supply gold data in the prediction conversation. Only after the prediction freeze exists may an
+independent key custodian call `orbita_seal_blind_scoring_key`. Reveal and scoring require a separate exact-hash
+approval through `orbita_approve_blind_reveal`. Never treat calibration accuracy as scientific proof or as evidence
+for an explanation outside the frozen vocabulary.

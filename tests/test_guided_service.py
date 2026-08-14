@@ -184,3 +184,83 @@ def test_guided_service_refuses_malformed_user_identity(gateway, monkeypatch):
         response = client.get("/guided/v1/cases", headers=_headers("../../operator"))
         assert response.status_code == 400
         assert "must be a UUID" in response.json()["error"]
+
+
+def test_guided_api_prepares_sanitized_blind_prediction_batch(gateway, monkeypatch):
+    monkeypatch.setenv("ORBITA_GUIDED_SERVICE_TOKEN", TOKEN)
+    monkeypatch.setenv("ORBITA_AGENT_AUTH_MODE", "none")
+    mcp, _ = build_mcp_server(gateway=gateway)
+    blind_tsv = (
+        "blind_event_id\tvisible_note\n"
+        "B-01\tsteady point light\n"
+        "B-02\tshort sensor dropout\n"
+        "B-03\tdistant navigation lights\n"
+    )
+    with TestClient(mcp.streamable_http_app()) as client:
+        created = client.post(
+            "/guided/v1/cases",
+            headers=_headers(),
+            json={"name": "Guided blind calibration", "goal": "Predict before reveal"},
+        )
+        case_id = created.json()["case_id"]
+        uploaded = client.post(
+            f"/guided/v1/cases/{case_id}/files",
+            headers=_headers(),
+            files={"file": ("blind.tsv", blind_tsv, "text/tab-separated-values")},
+        )
+        file_record = uploaded.json()
+        plan_body = {
+            "schema_version": "orbita-research-plan/0.1",
+            "selected_dataset": {"file_id": file_record["id"]},
+            "thresholds": {},
+            "candidates": [
+                {
+                    "id": "guided-blind-1",
+                    "statement": "Classify sanitized rows before gold reveal.",
+                    "kind": "prospective_blind_calibration",
+                    "visible_fields": ["blind_event_id", "visible_note"],
+                    "scoring_key_fields": ["gold_label", "unresolved_holdout"],
+                    "allowed_hypotheses": ["ORDINARY", "ARTIFACT", "INSUFFICIENT_DATA"],
+                    "allowed_epistemic_labels": ["PROSAIC_LIKELY", "UNRESOLVED"],
+                    "allowed_evidence_classes": ["SENSOR_LOG"],
+                    "prediction_provider": {"kind": "external_submission"},
+                    "expected_row_count": 3,
+                    "scoring_schema": {
+                        "gold_event_id_field": "blind_event_id",
+                        "gold_primary_label_field": "gold_label",
+                    },
+                }
+            ],
+        }
+        submitted = client.post(
+            f"/guided/v1/cases/{case_id}/plans",
+            headers=_headers(),
+            json={"plan": plan_body, "compiler": "guided-test"},
+        )
+        assert submitted.status_code == 201, submitted.text
+        plan = submitted.json()
+        approved = client.post(
+            f"/guided/v1/plans/{plan['plan_id']}/approve",
+            headers=_headers(),
+            json={
+                "expected_plan_hash": plan["plan_hash"],
+                "reviewer": "Guided test user",
+                "confirmation": APPROVAL_PHRASE,
+            },
+        )
+        assert approved.status_code == 200
+        prepared = client.post(
+            f"/guided/v1/cases/{case_id}/run",
+            headers=_headers(),
+            json={"plan_id": plan["plan_id"]},
+        )
+        assert prepared.status_code == 200, prepared.text
+        protocol = prepared.json()
+        assert protocol["status"] == "awaiting_predictions"
+        batch = client.get(
+            f"/guided/v1/blind/{protocol['id']}/batch", headers=_headers()
+        )
+        assert batch.status_code == 200, batch.text
+        assert len(batch.json()["rows"]) == 3
+        assert batch.json()["scoring_key_available"] is False
+        assert all("gold_label" not in row for row in batch.json()["rows"])
