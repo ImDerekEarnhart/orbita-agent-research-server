@@ -22,6 +22,7 @@ from starlette.responses import JSONResponse
 from . import __version__
 from .adjudication import adjudicate_epistemic_task, compress_epistemic_task
 from .archive_policy import ArchiveIngestionRefused, ArchivePolicy
+from .benchmark_isolation import BenchmarkIsolationProbe
 from .code_context import compress_code_context
 from .config import AgentConfig
 from .gateway import AgentGateway
@@ -185,10 +186,33 @@ def build_mcp_server(
     host: str = "127.0.0.1",
     port: int = 8765,
 ) -> tuple[FastMCP, AgentGateway]:
-    gateway = gateway or AgentGateway(config)
+    owned_gateway = gateway is None
+    isolation_probe = None
+    if gateway is None:
+        resolved_config = config or AgentConfig.from_env()
+        isolation_probe = BenchmarkIsolationProbe.capture(resolved_config)
+        gateway = AgentGateway(resolved_config)
+    elif os.getenv("ORBITA_BENCHMARK_CONDITION", "").strip():
+        raise RuntimeError(
+            "benchmark isolation cannot attest a pre-initialized gateway; pass config instead"
+        )
     genome = DiscoveryGenomeClient()
     tenants = build_registry(gateway.config.home)
     remote_auth = _remote_auth(gateway.config, host, port, on_identity=tenants.record_identity)
+    try:
+        isolation_attestation = (
+            isolation_probe.finalize(
+                gateway,
+                authentication=remote_auth.label,
+                guided_bridge_disabled=bool(genome.config.missing()),
+            )
+            if isolation_probe
+            else None
+        )
+    except Exception:
+        if owned_gateway:
+            gateway.close()
+        raise
 
     if not genome.config.missing() and remote_auth.label == "oauth-github":
         oauth_users = {
@@ -798,6 +822,15 @@ def build_mcp_server(
             max_files=max_files,
             max_characters=max_characters,
         )
+
+    if isolation_attestation is not None:
+
+        @mcp.custom_route("/benchmark-isolation", methods=["GET"], include_in_schema=False)
+        async def benchmark_isolation(_request: Request) -> JSONResponse:
+            # This administrative receipt is deliberately outside the MCP tool
+            # catalog. The evaluated model sees exactly the ordinary Orbita tool
+            # surface and is not told whether it is in B2 or B3.
+            return JSONResponse(isolation_attestation)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_build_language_snapshot(spec: dict[str, Any]) -> dict[str, Any]:
