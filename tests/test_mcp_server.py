@@ -45,6 +45,10 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
         "orbita_advance_general_problem_loop",
         "orbita_verify_general_problem_loop",
         "orbita_compile_plan",
+        "orbita_executor_registry_status",
+        "orbita_list_candidate_execution_receipts",
+        "orbita_get_candidate_execution_receipt",
+        "orbita_verify_candidate_execution_receipt",
         "orbita_approve_plan",
         "orbita_run_discovery",
         "orbita_blind_calibration_status",
@@ -122,6 +126,10 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
     assert tools["orbita_get_general_problem_loop"].annotations.readOnlyHint is True
     assert tools["orbita_advance_general_problem_loop"].annotations.destructiveHint is False
     assert tools["orbita_verify_general_problem_loop"].annotations.readOnlyHint is True
+    assert tools["orbita_executor_registry_status"].annotations.readOnlyHint is True
+    assert tools["orbita_list_candidate_execution_receipts"].annotations.readOnlyHint is True
+    assert tools["orbita_get_candidate_execution_receipt"].annotations.readOnlyHint is True
+    assert tools["orbita_verify_candidate_execution_receipt"].annotations.readOnlyHint is True
     assert tools["orbita_approve_plan"].annotations.destructiveHint is True
     assert tools["orbita_run_discovery"].annotations.destructiveHint is True
     assert tools["orbita_promote_improvement"].annotations.destructiveHint is True
@@ -163,7 +171,7 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
 
 def test_runtime_version_metadata_matches_package(gateway, monkeypatch):
     monkeypatch.setattr(gateway.knowledge, "status", lambda: {})
-    assert gateway.capabilities()["version"] == __version__ == "0.7.0"
+    assert gateway.capabilities()["version"] == __version__ == "0.8.0"
 
 
 def test_capabilities_executes_through_the_real_mcp_surface(gateway, monkeypatch):

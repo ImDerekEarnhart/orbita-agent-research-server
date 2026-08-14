@@ -421,12 +421,5 @@ def test_ordinary_discovery_still_rejects_unknown_candidate_kind_clearly(gateway
         "thresholds": {},
         "candidates": [{"id": "unknown-1", "statement": "Unsupported task", "kind": "unknown_executor"}],
     }
-    plan = gateway.submit_plan(case["id"], plan=plan_body)
-    approved = gateway.approve_plan(
-        plan["id"],
-        expected_plan_hash=plan["plan_hash"],
-        reviewer="research-owner",
-        confirmation=APPROVAL_PHRASE,
-    )
-    with pytest.raises(CandidateNotScorable, match="cannot fit a candidate"):
-        gateway.run_discovery(case["id"], plan_id=approved["id"])
+    with pytest.raises(CandidateNotScorable, match="ENGINE_CAPABILITY_LIMIT"):
+        gateway.submit_plan(case["id"], plan=plan_body)

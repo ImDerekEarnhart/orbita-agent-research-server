@@ -1389,6 +1389,26 @@ def build_mcp_server(
         return _gateway_for_caller().submit_plan(case_id, plan=plan, compiler=compiler)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_executor_registry_status() -> dict[str, Any]:
+        """List exact candidate-kind executor contracts, hashes, policies, and unavailable grounded kinds."""
+        return _gateway_for_caller().executor_registry_status()
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_list_candidate_execution_receipts(limit: int = 25) -> list[dict[str, Any]]:
+        """List append-only receipts emitted by the unified candidate execution dispatcher."""
+        return _gateway_for_caller().list_candidate_execution_receipts(limit=limit)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_get_candidate_execution_receipt(receipt_id: str) -> dict[str, Any]:
+        """Fetch one exact candidate execution dispatch receipt and its result reference."""
+        return _gateway_for_caller().get_candidate_execution_receipt(receipt_id)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_verify_candidate_execution_receipt(receipt_id: str) -> dict[str, Any]:
+        """Recompute and verify one candidate execution receipt and its result-reference hash."""
+        return _gateway_for_caller().verify_candidate_execution_receipt(receipt_id)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_get_plan(plan_id: str) -> dict[str, Any]:
         """Fetch the complete immutable plan and its SHA-256 hash for review."""
         return _gateway_for_caller().get_plan(plan_id)
@@ -1410,7 +1430,7 @@ def build_mcp_server(
 
     @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
     def orbita_run_discovery(case_id: str, plan_id: str) -> dict[str, Any]:
-        """Execute an approved plan, or prepare its governed blind-prediction protocol when declared."""
+        """Dispatch an approved, executor-bound plan without guessing or coercing candidate semantics."""
         return _gateway_for_caller().run_discovery(case_id, plan_id=plan_id)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)

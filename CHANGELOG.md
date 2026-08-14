@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.0 - 2026-08-14
+
+- Added a unified candidate execution registry with immutable, hash-bound executor contracts.
+- Bound compatible executor identity, implementation, verifier, input artifact, and protocol into every executable plan
+  before human approval.
+- Replaced candidate-kind fallback routing with exact contract dispatch for statistical tables, prospective blind
+  calibration, and structured research operators.
+- Added a governed research-operator adapter that freezes an external experiment without submitting, approving,
+  executing, verifying, or committing a scientific claim.
+- Added typed pre-approval `ENGINE_CAPABILITY_LIMIT` failures for ungrounded, mixed, or unsupported candidate kinds.
+- Added append-only candidate execution receipts and exposed registry/receipt reads through MCP and Guided.
+
 ## 0.7.0 - 2026-08-14
 
 - Added a tenant-scoped, append-only General Problem Loop for arbitrary bounded objectives.

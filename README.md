@@ -202,6 +202,14 @@ receipts, observation, falsification, diagnosis, inactive repair/learning propos
 commit or refusal. The attached model supplies proposals; Orbita validates each stage and controls every transition.
 See [docs/GENERAL_PROBLEM_LOOP.md](docs/GENERAL_PROBLEM_LOOP.md).
 
+### Unified candidate execution
+
+Every executable plan is now bound, before approval, to an exact installed executor contract. Candidate kinds are never
+silently coerced into the legacy table scorer. Statistical relationships, prospective blind calibration, and structured
+research operators resolve through separate hash-bound adapters; unsupported or incompletely grounded kinds stop with a
+typed `ENGINE_CAPABILITY_LIMIT`. Successful dispatch emits an append-only receipt. See
+[docs/UNIFIED_CANDIDATE_EXECUTION.md](docs/UNIFIED_CANDIDATE_EXECUTION.md).
+
 Orbita can learn from completed cases without rewriting its own code. The improvement lab can change only a small
 allowlist of research-policy values: candidate budget, scout split, deterministic seed, judge thresholds, and
 cross-seed falsification settings.

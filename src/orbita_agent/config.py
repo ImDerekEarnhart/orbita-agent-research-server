@@ -60,6 +60,10 @@ class AgentConfig:
         return self.home / "orbita_general_problem_loops.db"
 
     @property
+    def candidate_execution_db(self) -> Path:
+        return self.home / "orbita_candidate_execution.db"
+
+    @property
     def epistemic_db(self) -> Path:
         return self.home / "orbita_epistemic.db"
 

@@ -328,6 +328,23 @@ def test_guided_api_prepares_sanitized_blind_prediction_batch(gateway, monkeypat
         assert prepared.status_code == 200, prepared.text
         protocol = prepared.json()
         assert protocol["status"] == "awaiting_predictions"
+        assert protocol["execution_dispatch"]["executor_id"] == "prospective-blind-calibration/1"
+        registry = client.get("/guided/v1/executors", headers=_headers())
+        assert registry.status_code == 200
+        assert registry.json()["coercion_enabled"] is False
+        receipts = client.get("/guided/v1/execution-receipts", headers=_headers())
+        assert receipts.status_code == 200
+        assert receipts.json()["receipts"][0]["id"] == protocol["execution_dispatch"]["id"]
+        receipt = client.get(
+            f"/guided/v1/execution-receipts/{protocol['execution_dispatch']['id']}", headers=_headers()
+        )
+        assert receipt.status_code == 200
+        assert receipt.json()["receipt_hash"] == protocol["execution_dispatch"]["receipt_hash"]
+        verification = client.get(
+            f"/guided/v1/execution-receipts/{protocol['execution_dispatch']['id']}/verify", headers=_headers()
+        )
+        assert verification.status_code == 200
+        assert verification.json()["valid"] is True
         batch = client.get(
             f"/guided/v1/blind/{protocol['id']}/batch", headers=_headers()
         )
@@ -335,3 +352,36 @@ def test_guided_api_prepares_sanitized_blind_prediction_batch(gateway, monkeypat
         assert len(batch.json()["rows"]) == 3
         assert batch.json()["scoring_key_available"] is False
         assert all("gold_label" not in row for row in batch.json()["rows"])
+
+
+def test_guided_plan_submission_returns_typed_engine_limit_before_approval(gateway, monkeypatch):
+    monkeypatch.setenv("ORBITA_GUIDED_SERVICE_TOKEN", TOKEN)
+    monkeypatch.setenv("ORBITA_AGENT_AUTH_MODE", "none")
+    mcp, _ = build_mcp_server(gateway=gateway)
+    with TestClient(mcp.streamable_http_app()) as client:
+        created = client.post(
+            "/guided/v1/cases", headers=_headers(), json={"name": "Ungrounded operator", "goal": "Fail before approval"}
+        )
+        case_id = created.json()["case_id"]
+        uploaded = client.post(
+            f"/guided/v1/cases/{case_id}/files",
+            headers=_headers(),
+            files={"file": ("data.csv", "x,y\n1,2\n2,4\n", "text/csv")},
+        ).json()
+        response = client.post(
+            f"/guided/v1/cases/{case_id}/plans",
+            headers=_headers(),
+            json={
+                "plan": {
+                    "schema_version": "orbita-research-plan/0.1",
+                    "selected_dataset": {"file_id": uploaded["id"]},
+                    "thresholds": {},
+                    "candidates": [
+                        {"id": "op-1", "statement": "A prose-only operator", "kind": "research_operator"}
+                    ],
+                }
+            },
+        )
+        assert response.status_code == 422
+        assert response.json()["limitation"]["classification"] == "ENGINE_CAPABILITY_LIMIT"
+        assert response.json()["limitation"]["available_executor"] is None

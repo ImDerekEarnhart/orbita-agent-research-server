@@ -19,6 +19,7 @@ from orbita_discovery.falsifiers import BaselineFalsifier, CrossSeedFalsifier, H
 from orbita_discovery.judges import GatedJudge
 
 from .compiler import ResearchCompiler
+from .execution_dispatch import DEFAULT_EXECUTOR_REGISTRY
 from .ingestion import ArtifactIngestor
 from .memory import BeliefMemory
 from .reporting import ReportCompiler
@@ -75,17 +76,20 @@ class ResearchMVP:
             policy=policy,
             policy_receipt=policy_receipt,
         )
+        plan = DEFAULT_EXECUTOR_REGISTRY.bind_plan(plan, case)
         return self.store.save_plan(case_id, plan, compiler="orbita-heuristic-compiler/0.2-policy-governed")
 
     def submit_external_plan(self, case_id: str, plan: dict[str, Any], *, compiler: str = "external-ai") -> dict[str, Any]:
         case = self.store.get_case(case_id)
         validated = self.compiler.validate_external_plan(case, plan)
+        validated = DEFAULT_EXECUTOR_REGISTRY.bind_plan(validated, case)
         return self.store.save_plan(case_id, validated, compiler=compiler)
 
     def revise_plan(self, plan_id: str, plan: dict[str, Any], *, compiler: str = "human-review") -> dict[str, Any]:
         current = self.store.get_plan(plan_id)
         case = self.store.get_case(current["case_id"])
         validated = self.compiler.validate_external_plan(case, plan)
+        validated = DEFAULT_EXECUTOR_REGISTRY.bind_plan(validated, case)
         return self.store.revise_plan(plan_id, validated, compiler=compiler)
 
     def approve_plan(self, plan_id: str, *, reviewer: str = "local-user") -> dict[str, Any]:

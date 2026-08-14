@@ -11,12 +11,14 @@ from typing import Any
 import pandas as pd
 
 from orbita import guard_scope_escalation
-from orbita_discovery.core import CandidateNotScorable
 from orbita_mvp import ResearchMVP
+from orbita_mvp.execution_dispatch import DEFAULT_EXECUTOR_REGISTRY
 
 from . import __version__
 from .archive_policy import ArchivePolicy
-from .blind_calibration import BLIND_COMPANION_KINDS, PREDICTION_KIND, BlindCalibrationService
+from .blind_calibration import PREDICTION_KIND, BlindCalibrationService
+from .candidate_execution import CandidateExecutionLedger
+from .candidate_execution import content_hash as candidate_result_hash
 from .config import AgentConfig
 from .external_experiments import ExternalExperimentService
 from .general_problem_loop import GeneralProblemLoopService
@@ -67,6 +69,7 @@ class AgentGateway:
             self.service,
         )
         self.general_problem_loops = GeneralProblemLoopService(self.config.general_problem_loop_db)
+        self.candidate_executions = CandidateExecutionLedger(self.config.candidate_execution_db)
         self.memory = MemoryIndex(self.config.memory_db)
         self.objects = build_object_store(self.config.home / "objects")
         self._lock = threading.RLock()
@@ -85,6 +88,7 @@ class AgentGateway:
         for child in children:
             child.close()
         self.memory.close()
+        self.candidate_executions.close()
         self.general_problem_loops.close()
         self.blind_calibration.close()
         self.external_experiments.close()
@@ -128,6 +132,7 @@ class AgentGateway:
                 "hash-bound language snapshots, finite representation audits, and inert semantic transitions",
                 "typed capability-component graphs for archive synthesis",
                 "append-only General Problem Loops with hash-chained evidence and bounded retries",
+                "compile-time candidate-to-executor binding with append-only dispatch receipts",
             ],
             "approval_phrase": APPROVAL_PHRASE,
             "deletion_phrase": DELETION_PHRASE,
@@ -147,6 +152,10 @@ class AgentGateway:
             "external_experiments": self.external_experiments.status(),
             "blind_calibration": self.blind_calibration.status(),
             "general_problem_loop": self.general_problem_loops.status(),
+            "candidate_execution": {
+                "registry": DEFAULT_EXECUTOR_REGISTRY.status(),
+                "ledger": self.candidate_executions.status(),
+            },
             "knowledge": knowledge,
             "boundaries": [
                 "Surviving a configured gauntlet is not universal proof, causality, or novelty.",
@@ -157,6 +166,7 @@ class AgentGateway:
                 "General improvement candidates can be frozen and evaluated, but cannot activate themselves.",
                 "Language transitions create inert snapshots and receipts; they never patch or activate this runtime.",
                 "The General Problem Loop records executor receipts but cannot autonomously execute external actions.",
+                "Candidate kinds are never coerced into a different executor; missing grounding fails before approval.",
                 "Deterministic execution integrity is reported separately from scientific validity.",
             ],
         }
@@ -1053,6 +1063,21 @@ class AgentGateway:
         with self._lock:
             return self.service.submit_external_plan(case_id, plan, compiler=compiler)
 
+    def executor_registry_status(self) -> dict[str, Any]:
+        return DEFAULT_EXECUTOR_REGISTRY.status() | {"ledger": self.candidate_executions.status()}
+
+    def list_candidate_execution_receipts(self, *, limit: int = 25) -> list[dict[str, Any]]:
+        with self._lock:
+            return self.candidate_executions.list(limit=limit)
+
+    def get_candidate_execution_receipt(self, receipt_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.candidate_executions.get(receipt_id)
+
+    def verify_candidate_execution_receipt(self, receipt_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.candidate_executions.verify(receipt_id)
+
     def get_plan(self, plan_id: str) -> dict[str, Any]:
         with self._lock:
             return self.service.store.get_plan(plan_id)
@@ -1075,6 +1100,8 @@ class AgentGateway:
                 raise ValueError("Plan hash mismatch; fetch and review the current immutable plan again")
             if plan["status"] == "approved":
                 return plan
+            case = self.service.store.get_case(plan["case_id"])
+            DEFAULT_EXECUTOR_REGISTRY.validate_bound_plan(plan["plan"], case)
             return self.service.approve_plan(plan_id, reviewer=reviewer)
 
     def run_discovery(self, case_id: str, *, plan_id: str) -> dict[str, Any]:
@@ -1085,36 +1112,90 @@ class AgentGateway:
             if plan["status"] != "approved":
                 raise ValueError("The exact plan must be approved before execution")
             plan_body = plan["plan"]
-            candidates = plan_body.get("candidates", [])
-            kinds = {candidate.get("kind") for candidate in candidates}
-            statistical_kinds = {"linear_association", "group_difference"}
-            if kinds and kinds <= statistical_kinds:
-                run = self.service.run_case(case_id, plan_id=plan_id, auto_approve=False)
-                return self._run_view(run, include_findings=True)
-            if PREDICTION_KIND in kinds:
-                allowed = {PREDICTION_KIND} | BLIND_COMPANION_KINDS
-                if not kinds <= allowed:
-                    raise CandidateNotScorable(
-                        "prospective_blind_calibration cannot be mixed with statistical or unknown candidate kinds"
+            case = self.service.store.get_case(case_id)
+            contract = DEFAULT_EXECUTOR_REGISTRY.validate_bound_plan(plan_body, case)
+            binding = plan_body["execution_binding"]
+            try:
+                if contract.executor_id == "tabular-statistical/1":
+                    run = self.service.run_case(case_id, plan_id=plan_id, auto_approve=False)
+                    result = self._run_view(run, include_findings=True)
+                    return self._record_candidate_execution(plan, binding, "completed", result)
+                if contract.executor_id == "prospective-blind-calibration/1":
+                    candidates = plan_body.get("candidates", [])
+                    blind_policy = plan_body.get("blind_calibration", {})
+                    provider = (
+                        blind_policy.get("prediction_provider") if isinstance(blind_policy, dict) else None
+                    ) or plan_body.get("prediction_provider")
+                    for candidate in candidates:
+                        if candidate.get("kind") == PREDICTION_KIND and candidate.get("prediction_provider"):
+                            provider = candidate["prediction_provider"]
+                            break
+                    if isinstance(provider, dict) and provider.get("kind") == "external_submission":
+                        result = self.blind_calibration.prepare_from_approved_plan(case_id, plan_id)
+                    else:
+                        run = self.blind_calibration.execute_from_approved_plan(case_id, plan_id)
+                        result = self._run_view(run, include_findings=False)
+                    return self._record_candidate_execution(plan, binding, "prepared", result)
+                if contract.executor_id == "structured-research-operator/1":
+                    candidate = next(
+                        item for item in plan_body["candidates"]
+                        if item.get("kind") in {"research_operator", "external_experiment"}
                     )
-                blind_policy = plan_body.get("blind_calibration", {})
-                provider = (
-                    blind_policy.get("prediction_provider") if isinstance(blind_policy, dict) else None
-                ) or plan_body.get("prediction_provider")
-                for candidate in candidates:
-                    if candidate.get("kind") == PREDICTION_KIND and candidate.get("prediction_provider"):
-                        provider = candidate["prediction_provider"]
-                        break
-                if isinstance(provider, dict) and provider.get("kind") == "external_submission":
-                    return self.blind_calibration.prepare_from_approved_plan(case_id, plan_id)
-                run = self.blind_calibration.execute_from_approved_plan(case_id, plan_id)
-                return self._run_view(run, include_findings=False)
-            unsupported = ", ".join(sorted(repr(kind) for kind in kinds)) or "no candidate kind"
-            raise CandidateNotScorable(
-                "the execution dispatch cannot fit a candidate of kind "
-                f"{unsupported}; supported kinds are linear_association, group_difference, "
-                "and prospective_blind_calibration"
-            )
+                    execution = candidate["execution_contract"]
+                    experiment = self.external_experiments.freeze(
+                        case_id=case_id,
+                        plan_id=plan_id,
+                        expected_plan_hash=plan["plan_hash"],
+                        scientific_question=execution["scientific_question"],
+                        claim_scope=execution["claim_scope"],
+                        execution_spec=execution["execution_spec"],
+                        verdict_schema=execution["verdict_schema"],
+                        independent_verifier=execution["independent_verifier"],
+                        falsification_coverage=execution["falsification_coverage"],
+                        anti_rescue_rules=execution["anti_rescue_rules"],
+                        created_by=str(execution.get("created_by") or "unified-candidate-dispatch"),
+                    )
+                    result = {
+                        "status": "frozen_external_experiment",
+                        "candidate_id": candidate["id"],
+                        "experiment": experiment,
+                        "next_required_action": "submit the frozen experiment, then separately approve its exact execution manifest",
+                        "scientific_claim_committed": False,
+                    }
+                    return self._record_candidate_execution(plan, binding, "prepared", result)
+                raise RuntimeError(f"registered executor {contract.executor_id!r} has no dispatcher implementation")
+            except Exception as exc:
+                self.candidate_executions.record(
+                    case_id=case_id,
+                    plan_id=plan_id,
+                    plan_hash=plan["plan_hash"],
+                    binding=binding,
+                    outcome="failed",
+                    result_reference={"error_type": type(exc).__name__, "error": str(exc)},
+                )
+                raise
+
+    def _record_candidate_execution(
+        self,
+        plan: dict[str, Any],
+        binding: dict[str, Any],
+        outcome: str,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        reference = {
+            "payload_hash": candidate_result_hash(result),
+            "result_id": result.get("id") or result.get("protocol_id") or result.get("experiment", {}).get("id"),
+            "status": result.get("status"),
+        }
+        receipt = self.candidate_executions.record(
+            case_id=plan["case_id"],
+            plan_id=plan["id"],
+            plan_hash=plan["plan_hash"],
+            binding=binding,
+            outcome=outcome,
+            result_reference=reference,
+        )
+        return result | {"execution_dispatch": receipt}
 
     def blind_calibration_status(self) -> dict[str, Any]:
         with self._lock:

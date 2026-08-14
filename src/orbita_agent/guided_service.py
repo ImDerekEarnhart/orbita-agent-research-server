@@ -25,6 +25,8 @@ from starlette.datastructures import UploadFile
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 
+from orbita_mvp.execution_dispatch import ExecutionCapabilityLimit
+
 from .adjudication import adjudicate_epistemic_task, compress_epistemic_task
 from .code_context import compress_code_context
 from .gateway import AgentGateway
@@ -139,6 +141,8 @@ def install_guided_service_routes(
     def failure(exc: Exception) -> JSONResponse:
         if isinstance(exc, GuidedServiceError):
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=exc.status_code)
+        if isinstance(exc, ExecutionCapabilityLimit):
+            return JSONResponse({"ok": False, "limitation": exc.as_dict()}, status_code=422)
         if isinstance(exc, KeyError):
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
         if isinstance(exc, (ValueError, TypeError)):
@@ -273,6 +277,42 @@ def install_guided_service_routes(
             if not isinstance(components, list):
                 raise GuidedServiceError(400, "components must be an array.")
             return JSONResponse(build_capability_component_graph(components))
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(f"{GUIDED_API_PREFIX}/executors", methods=["GET"], include_in_schema=False)
+    async def guided_executor_registry(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse(bound(request).executor_registry_status())
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(f"{GUIDED_API_PREFIX}/execution-receipts", methods=["GET"], include_in_schema=False)
+    async def guided_execution_receipts(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse({"receipts": bound(request).list_candidate_execution_receipts()})
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/execution-receipts/{{receipt_id}}", methods=["GET"], include_in_schema=False
+    )
+    async def guided_execution_receipt(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse(
+                bound(request).get_candidate_execution_receipt(request.path_params["receipt_id"])
+            )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/execution-receipts/{{receipt_id}}/verify", methods=["GET"], include_in_schema=False
+    )
+    async def guided_verify_execution_receipt(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse(
+                bound(request).verify_candidate_execution_receipt(request.path_params["receipt_id"])
+            )
         except Exception as exc:  # noqa: BLE001
             return failure(exc)
 
