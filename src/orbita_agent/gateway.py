@@ -10,13 +10,16 @@ from typing import Any
 
 import pandas as pd
 
+from orbita import guard_scope_escalation
 from orbita_mvp import ResearchMVP
 
 from . import __version__
 from .archive_policy import ArchivePolicy
 from .config import AgentConfig
+from .external_experiments import ExternalExperimentService
 from .graph_adapter import analyze_graph, export_lean_certificate
 from .improvement import PROMOTION_PHRASE, ROLLBACK_PHRASE, ImprovementLab
+from .improvement_registry import ImprovementRegistry
 from .knowledge import KnowledgeStore
 from .memory_index import MemoryIndex, chat_export_members
 from .object_store import build_object_store, object_key
@@ -48,6 +51,13 @@ class AgentGateway:
         self.service = ResearchMVP(self.config.db_path, self.config.workspace)
         self.knowledge = KnowledgeStore(self.config.knowledge_db)
         self.improvements = ImprovementLab(self.config.improvement_db, self.service)
+        self.improvement_registry = ImprovementRegistry(self.config.improvement_db)
+        self.external_experiments = ExternalExperimentService(
+            self.config.external_experiment_db,
+            self.config.epistemic_db,
+            self.config.execution_workspace,
+            self.service,
+        )
         self.memory = MemoryIndex(self.config.memory_db)
         self.objects = build_object_store(self.config.home / "objects")
         self._lock = threading.RLock()
@@ -66,6 +76,8 @@ class AgentGateway:
         for child in children:
             child.close()
         self.memory.close()
+        self.external_experiments.close()
+        self.improvement_registry.close()
         self.improvements.close()
         self.knowledge.close()
         self.service.close()
@@ -100,6 +112,7 @@ class AgentGateway:
                 "persistent claims, evidence, contradictions, and supersession",
                 "curated research-memory search",
                 "bounded graph analysis and Lean finite-certificate export",
+                "frozen deterministic external experiments with independent verification",
             ],
             "approval_phrase": APPROVAL_PHRASE,
             "deletion_phrase": DELETION_PHRASE,
@@ -108,6 +121,7 @@ class AgentGateway:
                 "promotion_phrase": PROMOTION_PHRASE,
                 "rollback_phrase": ROLLBACK_PHRASE,
                 "active_policy": active_policy,
+                "general_candidate_registry": self.improvement_registry.status(),
             },
             "limits": {
                 "max_inline_bytes": self.config.max_inline_bytes,
@@ -115,6 +129,7 @@ class AgentGateway:
                 "max_graph_edges": self.config.max_graph_edges,
             },
             "archive_processing": self.service.ingestor.describe(),
+            "external_experiments": self.external_experiments.status(),
             "knowledge": knowledge,
             "boundaries": [
                 "Surviving a configured gauntlet is not universal proof, causality, or novelty.",
@@ -122,6 +137,8 @@ class AgentGateway:
                 "Inline agent uploads are text-only; browser/REST intake supports richer files.",
                 "Lean export checks a concrete finite witness only.",
                 "Self-improvement changes allowlisted research-policy values only and never promotes itself.",
+                "General improvement candidates can be frozen and evaluated, but cannot activate themselves.",
+                "Deterministic execution integrity is reported separately from scientific validity.",
             ],
         }
 
@@ -524,6 +541,16 @@ class AgentGateway:
         with self._lock:
             return self.improvements.status()
 
+    def guard_claim_scope(
+        self,
+        *,
+        evidence_scope: dict[str, Any],
+        proposed_claim_scope: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Reject claims whose scope is broader than their declared evidence."""
+
+        return guard_scope_escalation(evidence_scope, proposed_claim_scope)
+
     def improvement_history(self, *, limit: int = 25) -> dict[str, Any]:
         with self._lock:
             return self.improvements.history(limit=limit)
@@ -589,6 +616,365 @@ class AgentGateway:
                 reviewer=reviewer,
                 confirmation=confirmation,
             )
+
+    def governed_improvement_status(self) -> dict[str, Any]:
+        with self._lock:
+            return self.improvement_registry.status()
+
+    def register_improvement_candidate(
+        self,
+        *,
+        candidate_kind: str,
+        limitation_kind: str,
+        base_artifact: dict[str, Any],
+        candidate_artifact: dict[str, Any],
+        problem_statement: str,
+        rationale: str,
+        expected_benefit: str,
+        observed_failure_ids: list[str] | None = None,
+        known_risks: list[str] | None = None,
+        evidence: dict[str, Any] | None = None,
+        parent_candidate_id: str | None = None,
+        created_by: str = "agent-proposal",
+    ) -> dict[str, Any]:
+        """Register an inactive candidate without changing production behavior."""
+        with self._lock:
+            return self.improvement_registry.create_candidate(
+                candidate_kind=candidate_kind,
+                limitation_kind=limitation_kind,
+                base_artifact=base_artifact,
+                candidate_artifact=candidate_artifact,
+                problem_statement=problem_statement,
+                rationale=rationale,
+                expected_benefit=expected_benefit,
+                observed_failure_ids=observed_failure_ids,
+                known_risks=known_risks,
+                evidence=evidence,
+                parent_candidate_id=parent_candidate_id,
+                created_by=created_by,
+            )
+
+    def list_governed_improvements(self, *, limit: int = 25) -> list[dict[str, Any]]:
+        with self._lock:
+            return self.improvement_registry.list_candidates(limit=limit)
+
+    def get_governed_improvement(self, candidate_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.improvement_registry.get_candidate(candidate_id)
+
+    def freeze_improvement_evaluation(
+        self,
+        candidate_id: str,
+        *,
+        evaluation_plan: dict[str, Any],
+        frozen_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.improvement_registry.freeze_evaluation(
+                candidate_id,
+                evaluation_plan=evaluation_plan,
+                frozen_by=frozen_by,
+            )
+
+    def record_governed_improvement_evaluation(
+        self,
+        candidate_id: str,
+        *,
+        expected_candidate_hash: str,
+        expected_plan_hash: str,
+        result: dict[str, Any],
+        verdict: str,
+        evaluated_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.improvement_registry.record_evaluation(
+                candidate_id,
+                expected_candidate_hash=expected_candidate_hash,
+                expected_plan_hash=expected_plan_hash,
+                result=result,
+                verdict=verdict,
+                evaluated_by=evaluated_by,
+            )
+
+    def external_experiment_status(self) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.status()
+
+    def freeze_external_experiment(
+        self,
+        *,
+        case_id: str,
+        plan_id: str,
+        expected_plan_hash: str,
+        scientific_question: str,
+        claim_scope: dict[str, Any],
+        execution_spec: dict[str, Any],
+        verdict_schema: dict[str, Any],
+        independent_verifier: dict[str, Any],
+        falsification_coverage: dict[str, Any],
+        anti_rescue_rules: list[str],
+        created_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.freeze(
+                case_id=case_id,
+                plan_id=plan_id,
+                expected_plan_hash=expected_plan_hash,
+                scientific_question=scientific_question,
+                claim_scope=claim_scope,
+                execution_spec=execution_spec,
+                verdict_schema=verdict_schema,
+                independent_verifier=independent_verifier,
+                falsification_coverage=falsification_coverage,
+                anti_rescue_rules=anti_rescue_rules,
+                created_by=created_by,
+            )
+
+    def submit_external_experiment(
+        self, experiment_id: str, *, expected_experiment_hash: str, submitted_by: str
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.submit(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                submitted_by=submitted_by,
+            )
+
+    def approve_external_experiment(
+        self,
+        experiment_id: str,
+        *,
+        expected_experiment_hash: str,
+        expected_manifest_hash: str,
+        reviewer: str,
+        rationale: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.approve(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                expected_manifest_hash=expected_manifest_hash,
+                reviewer=reviewer,
+                rationale=rationale,
+                confirmation=confirmation,
+            )
+
+    def run_external_experiment(
+        self,
+        experiment_id: str,
+        *,
+        expected_experiment_hash: str,
+        expected_manifest_hash: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.execute(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                expected_manifest_hash=expected_manifest_hash,
+            )
+
+    def record_external_verification(
+        self,
+        experiment_id: str,
+        *,
+        expected_experiment_hash: str,
+        expected_execution_receipt_hash: str,
+        verifier_receipt: dict[str, Any],
+        conclusion: str,
+        verified_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.record_verification(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                expected_execution_receipt_hash=expected_execution_receipt_hash,
+                verifier_receipt=verifier_receipt,
+                conclusion=conclusion,
+                verified_by=verified_by,
+            )
+
+    def prepare_external_reproduction(
+        self,
+        experiment_id: str,
+        *,
+        expected_experiment_hash: str,
+        expected_execution_receipt_hash: str,
+        submitted_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.prepare_reproduction(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                expected_execution_receipt_hash=expected_execution_receipt_hash,
+                submitted_by=submitted_by,
+            )
+
+    def approve_external_reproduction(
+        self,
+        experiment_id: str,
+        *,
+        expected_experiment_hash: str,
+        expected_original_receipt_hash: str,
+        expected_reproduction_manifest_hash: str,
+        reviewer: str,
+        rationale: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.approve_reproduction(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                expected_original_receipt_hash=expected_original_receipt_hash,
+                expected_reproduction_manifest_hash=expected_reproduction_manifest_hash,
+                reviewer=reviewer,
+                rationale=rationale,
+                confirmation=confirmation,
+            )
+
+    def run_external_reproduction(
+        self,
+        experiment_id: str,
+        *,
+        expected_experiment_hash: str,
+        expected_original_receipt_hash: str,
+        expected_reproduction_manifest_hash: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.execute_reproduction(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                expected_original_receipt_hash=expected_original_receipt_hash,
+                expected_reproduction_manifest_hash=expected_reproduction_manifest_hash,
+            )
+
+    def record_external_coverage_bug(
+        self,
+        experiment_id: str,
+        *,
+        expected_experiment_hash: str,
+        claim_effect: str,
+        missed_counterexample: dict[str, Any],
+        reason: str,
+        fix: dict[str, Any],
+        old_results_impacted: list[str],
+        replacement_coverage: dict[str, Any],
+        recorded_by: str,
+        affected_claim_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.record_coverage_bug(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                claim_effect=claim_effect,
+                missed_counterexample=missed_counterexample,
+                reason=reason,
+                fix=fix,
+                old_results_impacted=old_results_impacted,
+                replacement_coverage=replacement_coverage,
+                recorded_by=recorded_by,
+                affected_claim_ids=affected_claim_ids,
+            )
+
+    def propagate_external_coverage_bug_to_claims(
+        self,
+        coverage_bug_id: str,
+        *,
+        expected_replacement_protocol_hash: str,
+    ) -> dict[str, Any]:
+        """Retry or audit the idempotent external-to-Guided claim bridge."""
+
+        with self._lock:
+            return self.external_experiments.propagate_coverage_bug_to_claims(
+                coverage_bug_id,
+                expected_replacement_protocol_hash=expected_replacement_protocol_hash,
+            )
+
+    def prepare_coverage_reevaluation(
+        self,
+        coverage_bug_id: str,
+        *,
+        expected_replacement_protocol_hash: str,
+        execution_spec: dict[str, Any],
+        resolution_targets: list[str],
+        submitted_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.prepare_coverage_reevaluation(
+                coverage_bug_id,
+                expected_replacement_protocol_hash=expected_replacement_protocol_hash,
+                execution_spec=execution_spec,
+                resolution_targets=resolution_targets,
+                submitted_by=submitted_by,
+            )
+
+    def approve_coverage_reevaluation(
+        self,
+        coverage_bug_id: str,
+        *,
+        expected_replacement_protocol_hash: str,
+        expected_reevaluation_hash: str,
+        expected_execution_manifest_hash: str,
+        reviewer: str,
+        rationale: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.approve_coverage_reevaluation(
+                coverage_bug_id,
+                expected_replacement_protocol_hash=expected_replacement_protocol_hash,
+                expected_reevaluation_hash=expected_reevaluation_hash,
+                expected_execution_manifest_hash=expected_execution_manifest_hash,
+                reviewer=reviewer,
+                rationale=rationale,
+                confirmation=confirmation,
+            )
+
+    def run_coverage_reevaluation(
+        self,
+        coverage_bug_id: str,
+        *,
+        expected_replacement_protocol_hash: str,
+        expected_reevaluation_hash: str,
+        expected_execution_manifest_hash: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.execute_coverage_reevaluation(
+                coverage_bug_id,
+                expected_replacement_protocol_hash=expected_replacement_protocol_hash,
+                expected_reevaluation_hash=expected_reevaluation_hash,
+                expected_execution_manifest_hash=expected_execution_manifest_hash,
+            )
+
+    def record_coverage_resolutions(
+        self,
+        coverage_bug_id: str,
+        *,
+        expected_reevaluation_hash: str,
+        expected_execution_receipt_hash: str,
+        resolutions: list[dict[str, Any]],
+        recorded_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.record_coverage_resolutions(
+                coverage_bug_id,
+                expected_reevaluation_hash=expected_reevaluation_hash,
+                expected_execution_receipt_hash=expected_execution_receipt_hash,
+                resolutions=resolutions,
+                recorded_by=recorded_by,
+            )
+
+    def get_coverage_bug(self, coverage_bug_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.get_coverage_bug(coverage_bug_id)
+
+    def get_external_experiment(self, experiment_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.get(experiment_id)
+
+    def list_external_experiments(self, *, limit: int = 25) -> list[dict[str, Any]]:
+        with self._lock:
+            return self.external_experiments.list(limit=limit)
 
     def submit_plan(self, case_id: str, *, plan: dict[str, Any], compiler: str = "external-ai") -> dict[str, Any]:
         if not compiler.strip() or len(compiler) > 120:

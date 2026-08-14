@@ -146,6 +146,29 @@ def test_guided_surface_and_mcp_share_one_tenant_gateway(gateway, monkeypatch, s
         )
         assert run.status_code == 200, run.text
         assert run.json()["case_id"] == case_id
+        findings = run.json()["findings_page"]["items"]
+        assert findings
+        assert all("evidence_status" in finding for finding in findings)
+        assert all("claim_scope" in finding for finding in findings)
+        assert all("falsification_coverage" in finding for finding in findings)
+        assert all(
+            finding["evidence_status"] != "FORMALLY_PROVED" for finding in findings
+        )
+        claim_ids = run.json()["summary"]["belief_import"]["claim_ids"]
+        assert claim_ids
+        guided_tenant = f"g-{hashlib.sha256(ALICE.encode('ascii')).hexdigest()[:32]}"
+        tenant_gateway = gateway.for_tenant(guided_tenant)
+        try:
+            history = tenant_gateway.claim_history(claim_ids[0])
+            assert history["current_epistemic_contract"] is not None
+            assert history["current_epistemic_contract"]["evidence_status"] in {
+                "EMPIRICAL_SURVIVOR",
+                "PROVISIONAL",
+                "REFUTED",
+                "UNRESOLVED",
+            }
+        finally:
+            tenant_gateway.close()
 
         graph = client.get(f"/guided/v1/cases/{case_id}/graph", headers=_headers())
         assert graph.status_code == 200

@@ -56,6 +56,14 @@ from .discovery import (
     GovernedDiscoveryRuntime,
     HypothesisSeed,
 )
+from .epistemic_contract import (
+    EvidenceStatus,
+    discovery_evidence_status,
+    guard_scope_escalation,
+    normalize_claim_scope,
+    normalize_falsification_coverage,
+    warranted_status,
+)
 from .evaluation import (
     EVALUATION_API_VERSION,
     EVALUATION_RESPONSE_SCHEMA,
@@ -222,6 +230,12 @@ __all__ = [
     "GovernedDiscoveryRuntime",
     "HypothesisSeed",
     "EvidenceKind",
+    "EvidenceStatus",
+    "discovery_evidence_status",
+    "guard_scope_escalation",
+    "normalize_claim_scope",
+    "normalize_falsification_coverage",
+    "warranted_status",
     "RESEARCH_API_VERSION",
     "EmpiricalResearchRuntime",
     "EmpiricalStudySpec",

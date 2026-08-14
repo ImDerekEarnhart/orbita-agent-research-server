@@ -39,10 +39,35 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
         "orbita_analyze_graph",
         "orbita_export_lean_witness",
         "orbita_improvement_status",
+        "orbita_guard_claim_scope",
         "orbita_suggest_improvement",
         "orbita_evaluate_improvement",
         "orbita_promote_improvement",
         "orbita_rollback_improvement",
+        "orbita_governed_improvement_status",
+        "orbita_register_improvement_candidate",
+        "orbita_list_governed_improvements",
+        "orbita_get_governed_improvement",
+        "orbita_freeze_improvement_evaluation",
+        "orbita_record_governed_improvement_evaluation",
+        "orbita_external_experiment_status",
+        "orbita_freeze_external_experiment",
+        "orbita_submit_external_experiment",
+        "orbita_approve_external_experiment",
+        "orbita_run_external_experiment",
+        "orbita_record_external_verification",
+        "orbita_get_external_experiment",
+        "orbita_list_external_experiments",
+        "orbita_prepare_external_reproduction",
+        "orbita_approve_external_reproduction",
+        "orbita_run_external_reproduction",
+        "orbita_record_external_coverage_bug",
+        "orbita_propagate_external_coverage_bug_to_claims",
+        "orbita_prepare_coverage_reevaluation",
+        "orbita_approve_coverage_reevaluation",
+        "orbita_run_coverage_reevaluation",
+        "orbita_record_coverage_resolutions",
+        "orbita_get_coverage_bug",
         "orbita_genome_status",
         "orbita_genome_list_operators",
         "orbita_genome_list_graphs",
@@ -68,6 +93,25 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
     assert tools["orbita_run_discovery"].annotations.destructiveHint is True
     assert tools["orbita_promote_improvement"].annotations.destructiveHint is True
     assert tools["orbita_rollback_improvement"].annotations.destructiveHint is True
+    assert tools["orbita_governed_improvement_status"].annotations.readOnlyHint is True
+    assert tools["orbita_guard_claim_scope"].annotations.readOnlyHint is True
+    assert tools["orbita_register_improvement_candidate"].annotations.destructiveHint is False
+    assert tools["orbita_record_governed_improvement_evaluation"].annotations.destructiveHint is False
+    assert tools["orbita_external_experiment_status"].annotations.readOnlyHint is True
+    assert tools["orbita_freeze_external_experiment"].annotations.destructiveHint is False
+    assert tools["orbita_approve_external_experiment"].annotations.destructiveHint is True
+    assert tools["orbita_run_external_experiment"].annotations.destructiveHint is True
+    assert tools["orbita_get_external_experiment"].annotations.readOnlyHint is True
+    assert tools["orbita_prepare_external_reproduction"].annotations.destructiveHint is False
+    assert tools["orbita_approve_external_reproduction"].annotations.destructiveHint is True
+    assert tools["orbita_run_external_reproduction"].annotations.destructiveHint is True
+    assert tools["orbita_record_external_coverage_bug"].annotations.destructiveHint is False
+    assert tools["orbita_propagate_external_coverage_bug_to_claims"].annotations.destructiveHint is False
+    assert tools["orbita_prepare_coverage_reevaluation"].annotations.destructiveHint is False
+    assert tools["orbita_approve_coverage_reevaluation"].annotations.destructiveHint is True
+    assert tools["orbita_run_coverage_reevaluation"].annotations.destructiveHint is True
+    assert tools["orbita_record_coverage_resolutions"].annotations.destructiveHint is False
+    assert tools["orbita_get_coverage_bug"].annotations.readOnlyHint is True
     assert tools["orbita_genome_status"].annotations.readOnlyHint is True
     assert tools["orbita_genome_list_questions"].annotations.readOnlyHint is True
     assert tools["orbita_genome_generate_questions"].annotations.readOnlyHint is False

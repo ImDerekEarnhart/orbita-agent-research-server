@@ -801,6 +801,17 @@ def build_mcp_server(
         return _gateway_for_caller().improvement_status()
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_guard_claim_scope(
+        evidence_scope: dict[str, Any],
+        proposed_claim_scope: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check whether evidence can support the proposed scope; bounded evidence cannot become universal."""
+        return _gateway_for_caller().guard_claim_scope(
+            evidence_scope=evidence_scope,
+            proposed_claim_scope=proposed_claim_scope,
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_improvement_history(limit: int = 25) -> dict[str, Any]:
         """List versioned policies and recent proposals without mutating the active policy."""
         return _gateway_for_caller().improvement_history(limit=limit)
@@ -866,6 +877,356 @@ def build_mcp_server(
             reviewer=reviewer,
             confirmation=confirmation,
         )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_governed_improvement_status() -> dict[str, Any]:
+        """Describe the inactive, append-only generalized improvement registry and its safety boundary."""
+        return _gateway_for_caller().governed_improvement_status()
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_register_improvement_candidate(
+        candidate_kind: str,
+        limitation_kind: str,
+        base_artifact: dict[str, Any],
+        candidate_artifact: dict[str, Any],
+        problem_statement: str,
+        rationale: str,
+        expected_benefit: str,
+        observed_failure_ids: list[str] | None = None,
+        known_risks: list[str] | None = None,
+        evidence: dict[str, Any] | None = None,
+        parent_candidate_id: str | None = None,
+        created_by: str = "agent-proposal",
+    ) -> dict[str, Any]:
+        """Register a hash-bound inactive improvement candidate; never activates or deploys it."""
+        return _gateway_for_caller().register_improvement_candidate(
+            candidate_kind=candidate_kind,
+            limitation_kind=limitation_kind,
+            base_artifact=base_artifact,
+            candidate_artifact=candidate_artifact,
+            problem_statement=problem_statement,
+            rationale=rationale,
+            expected_benefit=expected_benefit,
+            observed_failure_ids=observed_failure_ids,
+            known_risks=known_risks,
+            evidence=evidence,
+            parent_candidate_id=parent_candidate_id,
+            created_by=created_by,
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_list_governed_improvements(limit: int = 25) -> list[dict[str, Any]]:
+        """List inactive generalized improvement candidates and their immutable state history."""
+        return _gateway_for_caller().list_governed_improvements(limit=limit)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_get_governed_improvement(candidate_id: str) -> dict[str, Any]:
+        """Fetch one exact candidate, frozen evaluation plan, evaluation, and event history."""
+        return _gateway_for_caller().get_governed_improvement(candidate_id)
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_freeze_improvement_evaluation(
+        candidate_id: str,
+        evaluation_plan: dict[str, Any],
+        frozen_by: str,
+    ) -> dict[str, Any]:
+        """Freeze the exact benchmark, controls, gates, and anti-rescue rules before evaluation."""
+        return _gateway_for_caller().freeze_improvement_evaluation(
+            candidate_id,
+            evaluation_plan=evaluation_plan,
+            frozen_by=frozen_by,
+        )
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_record_governed_improvement_evaluation(
+        candidate_id: str,
+        expected_candidate_hash: str,
+        expected_plan_hash: str,
+        result: dict[str, Any],
+        verdict: str,
+        evaluated_by: str,
+    ) -> dict[str, Any]:
+        """Record one immutable evaluation against exact candidate and frozen-plan hashes."""
+        return _gateway_for_caller().record_governed_improvement_evaluation(
+            candidate_id,
+            expected_candidate_hash=expected_candidate_hash,
+            expected_plan_hash=expected_plan_hash,
+            result=result,
+            verdict=verdict,
+            evaluated_by=evaluated_by,
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_external_experiment_status() -> dict[str, Any]:
+        """Describe deterministic execution availability, approval rules, and the integrity/science boundary."""
+        return _gateway_for_caller().external_experiment_status()
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_freeze_external_experiment(
+        case_id: str,
+        plan_id: str,
+        expected_plan_hash: str,
+        scientific_question: str,
+        claim_scope: dict[str, Any],
+        execution_spec: dict[str, Any],
+        verdict_schema: dict[str, Any],
+        independent_verifier: dict[str, Any],
+        falsification_coverage: dict[str, Any],
+        anti_rescue_rules: list[str],
+        created_by: str,
+    ) -> dict[str, Any]:
+        """Freeze an approved plan, inline code/data, scope, coverage, verifier, and anti-rescue contract."""
+        return _gateway_for_caller().freeze_external_experiment(
+            case_id=case_id,
+            plan_id=plan_id,
+            expected_plan_hash=expected_plan_hash,
+            scientific_question=scientific_question,
+            claim_scope=claim_scope,
+            execution_spec=execution_spec,
+            verdict_schema=verdict_schema,
+            independent_verifier=independent_verifier,
+            falsification_coverage=falsification_coverage,
+            anti_rescue_rules=anti_rescue_rules,
+            created_by=created_by,
+        )
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_submit_external_experiment(
+        experiment_id: str,
+        expected_experiment_hash: str,
+        submitted_by: str,
+    ) -> dict[str, Any]:
+        """Stage the exact frozen experiment; execution remains blocked pending human approval."""
+        return _gateway_for_caller().submit_external_experiment(
+            experiment_id,
+            expected_experiment_hash=expected_experiment_hash,
+            submitted_by=submitted_by,
+        )
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_approve_external_experiment(
+        experiment_id: str,
+        expected_experiment_hash: str,
+        expected_manifest_hash: str,
+        reviewer: str,
+        rationale: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        """Approve only the exact frozen experiment and exact staged execution manifest."""
+        return _gateway_for_caller().approve_external_experiment(
+            experiment_id,
+            expected_experiment_hash=expected_experiment_hash,
+            expected_manifest_hash=expected_manifest_hash,
+            reviewer=reviewer,
+            rationale=rationale,
+            confirmation=confirmation,
+        )
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_run_external_experiment(
+        experiment_id: str,
+        expected_experiment_hash: str,
+        expected_manifest_hash: str,
+    ) -> dict[str, Any]:
+        """Execute the exact human-approved manifest without network and preserve a deterministic receipt."""
+        return _gateway_for_caller().run_external_experiment(
+            experiment_id,
+            expected_experiment_hash=expected_experiment_hash,
+            expected_manifest_hash=expected_manifest_hash,
+        )
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_record_external_verification(
+        experiment_id: str,
+        expected_experiment_hash: str,
+        expected_execution_receipt_hash: str,
+        verifier_receipt: dict[str, Any],
+        conclusion: str,
+        verified_by: str,
+    ) -> dict[str, Any]:
+        """Attach one immutable independent-verifier receipt without treating execution integrity as proof."""
+        return _gateway_for_caller().record_external_verification(
+            experiment_id,
+            expected_experiment_hash=expected_experiment_hash,
+            expected_execution_receipt_hash=expected_execution_receipt_hash,
+            verifier_receipt=verifier_receipt,
+            conclusion=conclusion,
+            verified_by=verified_by,
+        )
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_prepare_external_reproduction(
+        experiment_id: str,
+        expected_experiment_hash: str,
+        expected_execution_receipt_hash: str,
+        submitted_by: str,
+    ) -> dict[str, Any]:
+        """Freeze a technical replay from one successful exact execution; separate approval is still required."""
+        return _gateway_for_caller().prepare_external_reproduction(
+            experiment_id,
+            expected_experiment_hash=expected_experiment_hash,
+            expected_execution_receipt_hash=expected_execution_receipt_hash,
+            submitted_by=submitted_by,
+        )
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_approve_external_reproduction(
+        experiment_id: str,
+        expected_experiment_hash: str,
+        expected_original_receipt_hash: str,
+        expected_reproduction_manifest_hash: str,
+        reviewer: str,
+        rationale: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        """Approve only the exact technical replay bound to its original receipt and new manifest."""
+        return _gateway_for_caller().approve_external_reproduction(
+            experiment_id,
+            expected_experiment_hash=expected_experiment_hash,
+            expected_original_receipt_hash=expected_original_receipt_hash,
+            expected_reproduction_manifest_hash=expected_reproduction_manifest_hash,
+            reviewer=reviewer,
+            rationale=rationale,
+            confirmation=confirmation,
+        )
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_run_external_reproduction(
+        experiment_id: str,
+        expected_experiment_hash: str,
+        expected_original_receipt_hash: str,
+        expected_reproduction_manifest_hash: str,
+    ) -> dict[str, Any]:
+        """Run the exact approved replay and compare its output hashes with the original execution."""
+        return _gateway_for_caller().run_external_reproduction(
+            experiment_id,
+            expected_experiment_hash=expected_experiment_hash,
+            expected_original_receipt_hash=expected_original_receipt_hash,
+            expected_reproduction_manifest_hash=expected_reproduction_manifest_hash,
+        )
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_record_external_coverage_bug(
+        experiment_id: str,
+        expected_experiment_hash: str,
+        claim_effect: str,
+        missed_counterexample: dict[str, Any],
+        reason: str,
+        fix: dict[str, Any],
+        old_results_impacted: list[str],
+        replacement_coverage: dict[str, Any],
+        recorded_by: str,
+        affected_claim_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Preserve a missed counterexample, version coverage, and challenge bound Guided claims."""
+        return _gateway_for_caller().record_external_coverage_bug(
+            experiment_id,
+            expected_experiment_hash=expected_experiment_hash,
+            claim_effect=claim_effect,
+            missed_counterexample=missed_counterexample,
+            reason=reason,
+            fix=fix,
+            old_results_impacted=old_results_impacted,
+            replacement_coverage=replacement_coverage,
+            recorded_by=recorded_by,
+            affected_claim_ids=affected_claim_ids,
+        )
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_propagate_external_coverage_bug_to_claims(
+        coverage_bug_id: str,
+        expected_replacement_protocol_hash: str,
+    ) -> dict[str, Any]:
+        """Idempotently retry or audit a validated coverage bug's Guided claim impacts."""
+        return _gateway_for_caller().propagate_external_coverage_bug_to_claims(
+            coverage_bug_id,
+            expected_replacement_protocol_hash=expected_replacement_protocol_hash,
+        )
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_prepare_coverage_reevaluation(
+        coverage_bug_id: str,
+        expected_replacement_protocol_hash: str,
+        execution_spec: dict[str, Any],
+        resolution_targets: list[str],
+        submitted_by: str,
+    ) -> dict[str, Any]:
+        """Freeze and stage the replacement protocol with every affected result named up front."""
+        return _gateway_for_caller().prepare_coverage_reevaluation(
+            coverage_bug_id,
+            expected_replacement_protocol_hash=expected_replacement_protocol_hash,
+            execution_spec=execution_spec,
+            resolution_targets=resolution_targets,
+            submitted_by=submitted_by,
+        )
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_approve_coverage_reevaluation(
+        coverage_bug_id: str,
+        expected_replacement_protocol_hash: str,
+        expected_reevaluation_hash: str,
+        expected_execution_manifest_hash: str,
+        reviewer: str,
+        rationale: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        """Approve the exact replacement protocol, reevaluation contract, and staged execution manifest."""
+        return _gateway_for_caller().approve_coverage_reevaluation(
+            coverage_bug_id,
+            expected_replacement_protocol_hash=expected_replacement_protocol_hash,
+            expected_reevaluation_hash=expected_reevaluation_hash,
+            expected_execution_manifest_hash=expected_execution_manifest_hash,
+            reviewer=reviewer,
+            rationale=rationale,
+            confirmation=confirmation,
+        )
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_run_coverage_reevaluation(
+        coverage_bug_id: str,
+        expected_replacement_protocol_hash: str,
+        expected_reevaluation_hash: str,
+        expected_execution_manifest_hash: str,
+    ) -> dict[str, Any]:
+        """Execute the exact approved coverage replacement while preserving the flawed predecessor."""
+        return _gateway_for_caller().run_coverage_reevaluation(
+            coverage_bug_id,
+            expected_replacement_protocol_hash=expected_replacement_protocol_hash,
+            expected_reevaluation_hash=expected_reevaluation_hash,
+            expected_execution_manifest_hash=expected_execution_manifest_hash,
+        )
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_record_coverage_resolutions(
+        coverage_bug_id: str,
+        expected_reevaluation_hash: str,
+        expected_execution_receipt_hash: str,
+        resolutions: list[dict[str, Any]],
+        recorded_by: str,
+    ) -> dict[str, Any]:
+        """Resolve every affected result exactly once against the verified replacement execution receipt."""
+        return _gateway_for_caller().record_coverage_resolutions(
+            coverage_bug_id,
+            expected_reevaluation_hash=expected_reevaluation_hash,
+            expected_execution_receipt_hash=expected_execution_receipt_hash,
+            resolutions=resolutions,
+            recorded_by=recorded_by,
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_get_coverage_bug(coverage_bug_id: str) -> dict[str, Any]:
+        """Fetch a coverage bug, replacement protocol, reevaluation, and all affected-result resolutions."""
+        return _gateway_for_caller().get_coverage_bug(coverage_bug_id)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_get_external_experiment(experiment_id: str) -> dict[str, Any]:
+        """Fetch the frozen question, scope, coverage, execution receipt, and separate epistemic status."""
+        return _gateway_for_caller().get_external_experiment(experiment_id)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_list_external_experiments(limit: int = 25) -> list[dict[str, Any]]:
+        """List tenant-scoped frozen external experiments and their current governed state."""
+        return _gateway_for_caller().list_external_experiments(limit=limit)
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_submit_plan(case_id: str, plan: dict[str, Any], compiler: str = "external-ai") -> dict[str, Any]:

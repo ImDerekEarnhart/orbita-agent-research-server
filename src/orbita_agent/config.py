@@ -44,6 +44,18 @@ class AgentConfig:
         return self.home / "orbita_improvements.db"
 
     @property
+    def external_experiment_db(self) -> Path:
+        return self.home / "orbita_external_experiments.db"
+
+    @property
+    def epistemic_db(self) -> Path:
+        return self.home / "orbita_epistemic.db"
+
+    @property
+    def execution_workspace(self) -> Path:
+        return self.home / "external_executions"
+
+    @property
     def workspace(self) -> Path:
         return self.home / "workspace"
 

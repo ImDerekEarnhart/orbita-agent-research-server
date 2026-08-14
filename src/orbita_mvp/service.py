@@ -6,7 +6,14 @@ from typing import Any
 
 import pandas as pd
 
-from orbita import ActorRole, EpistemicLedger, EvidenceKind, Stance
+from orbita import (
+    ActorRole,
+    EpistemicLedger,
+    EvidenceKind,
+    EvidenceStatus,
+    Stance,
+    discovery_evidence_status,
+)
 from orbita_discovery.core import Engine, Ledger, finding_to_dict, survivors
 from orbita_discovery.falsifiers import BaselineFalsifier, CrossSeedFalsifier, HeldOutFalsifier
 from orbita_discovery.judges import GatedJudge
@@ -208,9 +215,56 @@ class ResearchMVP:
         candidate_to_claim: dict[str, str] = {}
         claim_ids: list[str] = []
         unscorable: list[dict[str, Any]] = []
+        selected = plan.get("selected_dataset", {})
+        thresholds = plan.get("thresholds", {})
         for finding in result.get("findings", []):
             candidate = finding["candidate"]
             payload = candidate.get("payload", {})
+            claim_scope = {
+                "domain": "uploaded_table",
+                "quantifier": "observed_rows",
+                "boundary": {
+                    "dataset_sha256": dataset_file["sha256"],
+                    "rows": selected.get("rows"),
+                    "columns": selected.get("columns"),
+                },
+                "assumptions": [
+                    item.get("statement")
+                    for item in plan.get("assumptions", [])
+                    if item.get("statement")
+                ],
+                "computational_model": "governed held-out association screen",
+                "representation_language": payload.get("kind") or "unspecified",
+                "predictor": payload.get("predictor"),
+                "outcome": payload.get("outcome"),
+                "group": payload.get("group"),
+            }
+            coverage = {
+                "tested_domains": ["locked confirmation partition of uploaded_table"],
+                "tested_sizes": [selected.get("rows")],
+                "seeds": list(range(int(thresholds.get("cross_seed_count", 0)))),
+                "perturbations": [
+                    attack.get("name") for attack in finding.get("falsifications", [])
+                ],
+                "controls": ["held-out split"],
+                "baselines": ["configured governed baseline"],
+                "known_failures": [
+                    attack.get("name")
+                    for attack in finding.get("falsifications", [])
+                    if attack.get("killed")
+                ],
+                "known_uncovered_regions": [
+                    "independently collected datasets",
+                    "causal interventions",
+                    "unrepresented variables and alternative model classes",
+                ],
+                "exhaustive": False,
+                "execution_receipt": result.get("run_id"),
+            }
+            evidence_status = discovery_evidence_status(finding.get("final_status"))
+            finding["evidence_status"] = evidence_status.value
+            finding["claim_scope"] = claim_scope
+            finding["falsification_coverage"] = coverage
             if finding.get("final_status") == "unscorable":
                 # Nothing was measured, so there is nothing to believe either way. The
                 # candidate stays in the hash-chained ledger and the dossier as a
@@ -232,15 +286,9 @@ class ResearchMVP:
                     }
                 )
                 continue
-            scope = {
-                "kind": payload.get("kind"),
-                "predictor": payload.get("predictor"),
-                "outcome": payload.get("outcome"),
-                "group": payload.get("group"),
-            }
             claim_id, _ = self.memory.resolve_or_create_claim(
                 candidate["statement"],
-                scope=scope,
+                scope=claim_scope,
                 claim_type="research_finding",
                 metadata={
                     "source_candidate_id": candidate["id"],
@@ -281,6 +329,17 @@ class ResearchMVP:
             self.memory.synchronize_status(
                 claim_id,
                 rationale=f"Imported governed discovery result from run {case_run_id}; evidence {evidence_id}",
+            )
+            self.memory.record_epistemic_contract(
+                claim_id,
+                evidence_status=evidence_status,
+                claim_scope=claim_scope,
+                falsification_coverage=coverage,
+                reason=(
+                    "Operational discovery status translated without treating finite "
+                    "testing, execution integrity, or ledger commitment as proof."
+                ),
+                source_run_id=case_run_id,
             )
             finding_type = (
                 "robust_relation" if support and final_status == "supported"
@@ -333,6 +392,28 @@ class ResearchMVP:
             )
             self.ledger.attest(claim_id, evidence, Stance.SUPPORT, actor="data-profiler", actor_role=ActorRole.TOOL)
             self.memory.synchronize_status(claim_id, rationale="Deterministic data-profile finding")
+            quality_scope = {
+                "domain": "uploaded_table",
+                "quantifier": "observed_rows",
+                "boundary": {"dataset_sha256": dataset_file["sha256"]},
+                "assumptions": [],
+                "computational_model": "deterministic data profiler",
+                "representation_language": "tabular data quality",
+            }
+            self.memory.record_epistemic_contract(
+                claim_id,
+                evidence_status=EvidenceStatus.BOUNDED_VERIFIED,
+                claim_scope=quality_scope,
+                falsification_coverage={
+                    "tested_domains": ["uploaded_table"],
+                    "tested_sizes": [selected.get("rows")],
+                    "known_uncovered_regions": ["other datasets"],
+                    "exhaustive": False,
+                    "execution_receipt": case_run_id,
+                },
+                reason="Deterministic observation bounded to the identified dataset.",
+                source_run_id=case_run_id,
+            )
             claim_ids.append(claim_id)
             self.store.link_claim(
                 case_id=case_id,

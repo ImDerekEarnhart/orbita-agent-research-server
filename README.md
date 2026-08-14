@@ -192,6 +192,47 @@ cross-seed falsification settings.
    exact confirmation phrase.
 5. `orbita_rollback_improvement` can restore a previously active policy through another hash-bound approval.
 
+The generalized governed registry is a separate, inactive lane. It can register policy, code, operator, verifier,
+language, retrieval, UI, performance, and safety candidates; freeze their evaluation contracts; and record one
+hash-bound result. It has no generalized promotion, merge, or deployment tool.
+
+## Deterministic external experiments
+
+Questions that do not fit Orbita's built-in table scorer can be preserved and routed through a frozen external
+experiment instead of being silently translated into a different statistical question. The Agent/MCP v1 route:
+
+1. requires an already approved Orbita plan and its exact hash;
+2. freezes claim scope, coverage (including untested regions), inline code/data, outputs, verifier, and anti-rescue rules;
+3. stages a digest-pinned, network-disabled, non-root execution manifest;
+4. requires separate human approval bound to both experiment and manifest hashes;
+5. records output and execution-receipt hashes; and
+6. stores independent verification separately from execution integrity.
+
+A successful run remains epistemically `UNVERIFIED` until a verifier receipt is recorded. Even then, support is
+reported as `EMPIRICAL_SURVIVOR`, not universal proof. The v1 MCP surface accepts inline text artifacts only and
+rejects arbitrary server file paths.
+
+Successful executions can be replayed from their exact staged artifacts. The replay receives a new manifest and a
+separate exact-hash human approval. Matching output hashes establish bitwise technical reproduction only; Orbita
+explicitly reports that scientific reproduction is not established by same-protocol replay.
+
+If a missed, independently receipt-backed counterexample exposes a coverage bug, Orbita preserves the original
+experiment, changes its epistemic status to `REFUTED` or `CHALLENGED` as declared by the validated effect, creates a
+hash-bound replacement protocol version, and marks reevaluation required. It never edits the old protocol in place.
+
+The replacement protocol can then be frozen as a new deterministic execution. Every affected result must be declared
+before approval. After execution, the bug remains open until every declared result receives exactly one disposition
+(`refuted`, `challenged`, `unchanged`, or `superseded`) tied to the exact replacement execution receipt.
+
+Guided discovery findings also carry a separate epistemic contract: an explicit evidence status, normalized claim
+scope, falsification coverage, and known untested regions. `supported` translates to `EMPIRICAL_SURVIVOR`, never
+`FORMALLY_PROVED`. The read-only `orbita_guard_claim_scope` MCP tool rejects attempts to turn sample or bounded
+evidence into a broader universal claim. Epistemic events are append-only and appear in reconstructed claim history.
+Validated external coverage bugs may name affected Guided claim IDs. Orbita then preserves immutable claim bindings,
+appends a downgraded evidence state, and opens re-examination work for those claims and their dependents. The
+`orbita_propagate_external_coverage_bug_to_claims` tool safely retries this cross-database projection without creating
+duplicate history.
+
 The lab cannot edit source, invoke a shell, deploy, or activate its own proposal. New plans record the active policy
 ID, version, hash, and whether the caller overrode the candidate budget.
 
@@ -204,6 +245,7 @@ The exact approval phrase is reported by `orbita_capabilities`; clients should n
 - Vault: full-text curated research search and structured claim cards.
 - Graph theory: preserved finite-run summaries, near misses, bounded graph analysis, and Lean witness export.
 - Improvement: history-derived proposals, deterministic benchmark replay, policy activation, and rollback.
+- External experiments: scope-preserving deterministic execution with exact approval and independent verification.
 
 ## Scientific boundaries
 
