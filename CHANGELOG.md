@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0 - 2026-08-14
+
+- Added canonical, inert Language Snapshots covering primitives, observables, epistemic boundaries, permissions, and
+  invariants.
+- Added finite representation collision and nuisance-overseparation audits plus machine-checkable language-limit
+  certificates.
+- Added hash-bound repair candidates and exact-authorization transition receipts that cannot activate the runtime.
+- Added a fixed-parameter Temporal Unaskability audit comparing ordinary memory baselines, hysteresis, and State-Inertia.
+- Added typed capability-component graphs for conservative archive synthesis.
+- Added seven adversarial semantic-evolution tests and exposed the new operations through read-only MCP tools.
+
 ## Unreleased
 
 ## 0.5.0 — 2026-08-13

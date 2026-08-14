@@ -65,6 +65,43 @@ def test_guided_surface_and_mcp_share_one_tenant_gateway(gateway, monkeypatch, s
         assert compressed.status_code == 200
         assert compressed.json()["files"][0]["path"] == "payments.py"
 
+        snapshot = client.post(
+            "/guided/v1/semantic/language-snapshot",
+            headers=_headers(),
+            json={
+                "spec": {
+                    "name": "Present-only language",
+                    "version": "L0",
+                    "primitives": [{
+                        "name": "current", "kind": "observable", "inputs": ["scalar"], "output": "x_t",
+                        "semantics": {"operator": "current_value"}, "dependencies": [],
+                    }],
+                    "observables": ["x_t"], "refusal_conditions": [], "unknown_conditions": ["not identified"],
+                    "read_permissions": ["visible values"], "write_permissions": [],
+                    "grounding_rules": ["declarative semantics"], "invariants": ["UNKNOWN != FALSE"],
+                }
+            },
+        )
+        assert snapshot.status_code == 200, snapshot.text
+        assert snapshot.json()["active"] is False
+        temporal = client.post(
+            "/guided/v1/semantic/temporal-audit",
+            headers=_headers(),
+            json={
+                "histories": [
+                    {"world_id": "a", "values": [-1, -1, 0.5], "outcome": "low"},
+                    {"world_id": "b", "values": [1, 1, 0.5], "outcome": "high"},
+                ],
+                "candidates": [
+                    {"name": "present", "operator": "current_value", "parameters": {}},
+                    {"name": "lag", "operator": "lag", "parameters": {"lag": 1}},
+                ],
+            },
+        )
+        assert temporal.status_code == 200, temporal.text
+        assert temporal.json()["admission_decision"] == "none"
+        assert temporal.json()["candidate_results"][0]["name"] == "lag"
+
         uploaded = client.post(
             f"/guided/v1/cases/{case_id}/files",
             headers=_headers(),

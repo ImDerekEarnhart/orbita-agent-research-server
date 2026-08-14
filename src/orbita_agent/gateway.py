@@ -122,6 +122,8 @@ class AgentGateway:
                 "bounded graph analysis and Lean finite-certificate export",
                 "frozen deterministic external experiments with independent verification",
                 "prospective blind calibration with prediction-before-reveal scoring",
+                "hash-bound language snapshots, finite representation audits, and inert semantic transitions",
+                "typed capability-component graphs for archive synthesis",
             ],
             "approval_phrase": APPROVAL_PHRASE,
             "deletion_phrase": DELETION_PHRASE,
@@ -148,6 +150,7 @@ class AgentGateway:
                 "Lean export checks a concrete finite witness only.",
                 "Self-improvement changes allowlisted research-policy values only and never promotes itself.",
                 "General improvement candidates can be frozen and evaluated, but cannot activate themselves.",
+                "Language transitions create inert snapshots and receipts; they never patch or activate this runtime.",
                 "Deterministic execution integrity is reported separately from scientific validity.",
             ],
         }

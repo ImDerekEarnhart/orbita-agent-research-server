@@ -28,6 +28,12 @@ from starlette.responses import HTMLResponse, JSONResponse, Response
 from .adjudication import adjudicate_epistemic_task, compress_epistemic_task
 from .code_context import compress_code_context
 from .gateway import AgentGateway
+from .semantic_evolution import (
+    audit_representation,
+    audit_temporal_unaskability,
+    build_capability_component_graph,
+    build_language_snapshot,
+)
 from .uploads import safe_upload_filename
 
 GUIDED_API_PREFIX = "/guided/v1"
@@ -217,6 +223,56 @@ def install_guided_service_routes(
                     max_characters=int(body.get("max_characters", 80_000)),
                 )
             )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(f"{GUIDED_API_PREFIX}/semantic/language-snapshot", methods=["POST"], include_in_schema=False)
+    async def guided_language_snapshot(request: Request) -> JSONResponse:
+        try:
+            bound(request)
+            body = await _json(request)
+            spec = body.get("spec")
+            if not isinstance(spec, dict):
+                raise GuidedServiceError(400, "spec must be a JSON object.")
+            return JSONResponse(build_language_snapshot(spec))
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(f"{GUIDED_API_PREFIX}/semantic/representation-audit", methods=["POST"], include_in_schema=False)
+    async def guided_representation_audit(request: Request) -> JSONResponse:
+        try:
+            bound(request)
+            body = await _json(request)
+            snapshot, cases = body.get("snapshot"), body.get("cases")
+            if not isinstance(snapshot, dict) or not isinstance(cases, list):
+                raise GuidedServiceError(400, "snapshot and a cases array are required.")
+            return JSONResponse(audit_representation(snapshot, cases))
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(f"{GUIDED_API_PREFIX}/semantic/temporal-audit", methods=["POST"], include_in_schema=False)
+    async def guided_temporal_audit(request: Request) -> JSONResponse:
+        try:
+            bound(request)
+            body = await _json(request)
+            histories, candidates = body.get("histories"), body.get("candidates")
+            if not isinstance(histories, list) or not isinstance(candidates, list):
+                raise GuidedServiceError(400, "histories and candidates arrays are required.")
+            return JSONResponse(
+                audit_temporal_unaskability(histories, candidates, tolerance=float(body.get("tolerance", 1e-9)))
+            )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(f"{GUIDED_API_PREFIX}/semantic/component-graph", methods=["POST"], include_in_schema=False)
+    async def guided_component_graph(request: Request) -> JSONResponse:
+        try:
+            bound(request)
+            body = await _json(request)
+            components = body.get("components")
+            if not isinstance(components, list):
+                raise GuidedServiceError(400, "components must be an array.")
+            return JSONResponse(build_capability_component_graph(components))
         except Exception as exc:  # noqa: BLE001
             return failure(exc)
 

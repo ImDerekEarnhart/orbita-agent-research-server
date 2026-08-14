@@ -1,0 +1,16 @@
+{
+  "histories": [
+    {"world_id": "low-history", "values": [-1, -1, -1, -1, 0.51], "outcome": "low"},
+    {"world_id": "high-history", "values": [1, 1, 1, 1, 0.51], "outcome": "high"}
+  ],
+  "candidates": [
+    {"name": "present only", "operator": "current_value", "parameters": {}},
+    {"name": "lag-1", "operator": "lag", "parameters": {"lag": 1}},
+    {"name": "window mean", "operator": "window_mean", "parameters": {"window": 5}},
+    {"name": "EWMA", "operator": "ewma", "parameters": {"alpha": 0.2}},
+    {"name": "linear memory", "operator": "linear_recurrence", "parameters": {"decay": 0.8, "gain": 0.2}},
+    {"name": "hysteresis", "operator": "hysteresis", "parameters": {"low": -0.25, "high": 0.25}},
+    {"name": "State-Inertia", "operator": "state_inertia", "parameters": {"alpha": 0.1, "eta": 0.2}}
+  ],
+  "tolerance": 1e-9
+}

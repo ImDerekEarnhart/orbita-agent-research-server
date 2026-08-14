@@ -31,6 +31,13 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
         "orbita_adjudicate_epistemic_task",
         "orbita_compress_epistemic_task",
         "orbita_compress_code_context",
+        "orbita_build_language_snapshot",
+        "orbita_audit_representation",
+        "orbita_build_language_limit_certificate",
+        "orbita_build_language_repair_candidate",
+        "orbita_materialize_language_transition",
+        "orbita_build_capability_component_graph",
+        "orbita_audit_temporal_unaskability",
         "orbita_compile_plan",
         "orbita_approve_plan",
         "orbita_run_discovery",
@@ -96,6 +103,13 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
     assert tools["orbita_compress_epistemic_task"].annotations.destructiveHint is False
     assert tools["orbita_compress_code_context"].annotations.readOnlyHint is True
     assert tools["orbita_compress_code_context"].annotations.destructiveHint is False
+    assert tools["orbita_build_language_snapshot"].annotations.readOnlyHint is True
+    assert tools["orbita_audit_representation"].annotations.readOnlyHint is True
+    assert tools["orbita_build_language_limit_certificate"].annotations.readOnlyHint is True
+    assert tools["orbita_build_language_repair_candidate"].annotations.readOnlyHint is True
+    assert tools["orbita_materialize_language_transition"].annotations.readOnlyHint is True
+    assert tools["orbita_build_capability_component_graph"].annotations.readOnlyHint is True
+    assert tools["orbita_audit_temporal_unaskability"].annotations.readOnlyHint is True
     assert tools["orbita_approve_plan"].annotations.destructiveHint is True
     assert tools["orbita_run_discovery"].annotations.destructiveHint is True
     assert tools["orbita_promote_improvement"].annotations.destructiveHint is True
@@ -137,7 +151,7 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
 
 def test_runtime_version_metadata_matches_package(gateway, monkeypatch):
     monkeypatch.setattr(gateway.knowledge, "status", lambda: {})
-    assert gateway.capabilities()["version"] == __version__ == "0.5.0"
+    assert gateway.capabilities()["version"] == __version__ == "0.6.0"
 
 
 def test_capabilities_executes_through_the_real_mcp_surface(gateway, monkeypatch):
@@ -171,6 +185,41 @@ def test_mcp_schemas_are_machine_usable(gateway):
     code_compression = tools["orbita_compress_code_context"].parameters
     assert set(code_compression["required"]) == {"issue", "files"}
     assert code_compression["properties"]["max_files"]["default"] == 6
+    language_snapshot = tools["orbita_build_language_snapshot"].parameters
+    assert set(language_snapshot["required"]) == {"spec"}
+    representation_audit = tools["orbita_audit_representation"].parameters
+    assert set(representation_audit["required"]) == {"snapshot", "cases"}
+
+
+def test_language_snapshot_executes_through_real_mcp_surface(gateway):
+    mcp, _ = build_mcp_server(gateway=gateway)
+    spec = {
+        "name": "Minimal language",
+        "version": "L0",
+        "primitives": [
+            {
+                "name": "identity",
+                "kind": "observable",
+                "inputs": ["value"],
+                "output": "value",
+                "semantics": {"operator": "identity"},
+                "dependencies": [],
+            }
+        ],
+        "observables": ["value"],
+        "refusal_conditions": [],
+        "unknown_conditions": ["not identified"],
+        "read_permissions": ["visible values"],
+        "write_permissions": [],
+        "grounding_rules": ["declarative semantics required"],
+        "invariants": ["UNKNOWN != FALSE"],
+    }
+
+    _content, snapshot = asyncio.run(mcp.call_tool("orbita_build_language_snapshot", {"spec": spec}))
+
+    assert snapshot["schema"] == "orbita-language-snapshot/1"
+    assert snapshot["active"] is False
+    assert len(snapshot["snapshot_hash"]) == 64
 
 
 def test_adjudication_tool_executes_through_the_real_mcp_surface(gateway):

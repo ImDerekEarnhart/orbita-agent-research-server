@@ -179,6 +179,22 @@ route, OAuth discovery/registration/token/revocation routes, and protected `/mcp
 
 ## Governed self-improvement
 
+### Governed semantic evolution
+
+Orbita can now represent a finite executable language as an immutable `LanguageSnapshot`, partition explicit worlds
+by what that language can observe, identify exact outcome-changing collisions and nuisance overseparation, and issue a
+hash-bound `LanguageLimitCertificate`. A proposed repair must name one declarative primitive plus prospective recovery,
+unchanged-control, and new-failure predictions. Only a prospectively survived, exact-hash evaluation plus the exact
+human transition phrase can materialize the next snapshot.
+
+Materialization deliberately creates an **inert** `L(t+1)` snapshot and transition receipt. It does not execute proposed
+semantics, edit source code, deploy, or modify the active Orbita runtime. This keeps language diagnosis, candidate
+generation, evaluation, authorization, and runtime activation as separate authorities.
+
+The companion capability-component graph converts archived ideas into typed inputs, outputs, capabilities, needs,
+failure modes, assumptions, and falsifiers. Its edges assert interface matches only—not scientific validity or successful
+composition.
+
 Orbita can learn from completed cases without rewriting its own code. The improvement lab can change only a small
 allowlist of research-policy values: candidate budget, scout split, deterministic seed, judge thresholds, and
 cross-seed falsification settings.

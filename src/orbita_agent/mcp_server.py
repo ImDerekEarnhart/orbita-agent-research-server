@@ -37,6 +37,15 @@ from .genome_client import (
 from .guided_service import install_guided_service_routes
 from .oauth import ORBITA_SCOPE, GitHubOAuthProvider
 from .object_store import ObjectStoreError
+from .semantic_evolution import (
+    audit_representation,
+    audit_temporal_unaskability,
+    build_capability_component_graph,
+    build_language_limit_certificate,
+    build_language_snapshot,
+    build_repair_candidate,
+    materialize_authorized_transition,
+)
 from .tenancy import LegacySinglePrincipal, TenantResolutionError, build_registry
 from .uploads import UploadError, UploadTicketStore, max_upload_bytes
 
@@ -789,6 +798,95 @@ def build_mcp_server(
             max_files=max_files,
             max_characters=max_characters,
         )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_build_language_snapshot(spec: dict[str, Any]) -> dict[str, Any]:
+        """Hash everything a proposed finite language can observe, express, refuse, read, and write.
+
+        The returned snapshot is inert. This tool does not execute semantics or alter Orbita's active runtime.
+        """
+        return build_language_snapshot(spec)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_audit_representation(snapshot: dict[str, Any], cases: list[dict[str, Any]]) -> dict[str, Any]:
+        """Find exact finite collisions and nuisance overseparation under a hash-bound language snapshot."""
+        return audit_representation(snapshot, cases)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_build_language_limit_certificate(
+        snapshot: dict[str, Any],
+        audit: dict[str, Any],
+        proof_path: str,
+        proof_artifact_hash: str,
+        checker_receipt_hash: str,
+    ) -> dict[str, Any]:
+        """Create a machine-checkable finite LANGUAGE_LIMIT certificate from an exact collision witness."""
+        return build_language_limit_certificate(
+            snapshot,
+            audit,
+            proof_path=proof_path,
+            proof_artifact_hash=proof_artifact_hash,
+            checker_receipt_hash=checker_receipt_hash,
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_build_language_repair_candidate(
+        snapshot: dict[str, Any],
+        certificate: dict[str, Any],
+        primitive: dict[str, Any],
+        predicted_resolved_collisions: list[str],
+        predicted_unchanged_cases: list[str],
+        predicted_new_failures: list[str],
+        minimality_claim: str,
+    ) -> dict[str, Any]:
+        """Propose one inactive primitive with prospective recovery, stability, and failure predictions."""
+        return build_repair_candidate(
+            snapshot,
+            certificate,
+            primitive=primitive,
+            predicted_resolved_collisions=predicted_resolved_collisions,
+            predicted_unchanged_cases=predicted_unchanged_cases,
+            predicted_new_failures=predicted_new_failures,
+            minimality_claim=minimality_claim,
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_materialize_language_transition(
+        snapshot: dict[str, Any],
+        candidate: dict[str, Any],
+        evaluation: dict[str, Any],
+        expected_candidate_hash: str,
+        expected_evaluation_hash: str,
+        authorized_by: str,
+        confirmation: str,
+        new_version: str,
+    ) -> dict[str, Any]:
+        """Materialize an inert L(t+1) snapshot after exact survived evidence and human authorization.
+
+        This emits a transition receipt but cannot patch, deploy, or activate the production runtime.
+        """
+        return materialize_authorized_transition(
+            snapshot,
+            candidate,
+            evaluation,
+            expected_candidate_hash=expected_candidate_hash,
+            expected_evaluation_hash=expected_evaluation_hash,
+            authorized_by=authorized_by,
+            confirmation=confirmation,
+            new_version=new_version,
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_build_capability_component_graph(components: list[dict[str, Any]]) -> dict[str, Any]:
+        """Connect typed archive primitives by exact data interfaces and limitation-resolution matches."""
+        return build_capability_component_graph(components)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_audit_temporal_unaskability(
+        histories: list[dict[str, Any]], candidates: list[dict[str, Any]], tolerance: float = 1e-9
+    ) -> dict[str, Any]:
+        """Compare fixed temporal operators on exact present-only collisions without fitting or admission."""
+        return audit_temporal_unaskability(histories, candidates, tolerance=tolerance)
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_compile_plan(case_id: str, max_candidates: int | None = None) -> dict[str, Any]:

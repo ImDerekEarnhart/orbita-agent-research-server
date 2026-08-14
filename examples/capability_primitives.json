@@ -1,0 +1,57 @@
+[
+  {
+    "id": "unaskable-questions",
+    "type": "representation_expander",
+    "inputs": ["competing_hypotheses", "current_measurement_language"],
+    "outputs": ["language_limit_witness", "new_observable_candidate"],
+    "capabilities": ["detect_representation_collision", "locate_missing_distinction"],
+    "needs": ["prospective_falsification", "external_admission"],
+    "failure_modes": ["A weak search can mistake search failure for a language limit."],
+    "assumptions": ["Competing hypotheses make different predictions somewhere."],
+    "falsifiers": ["An existing observable separates every alleged collision."]
+  },
+  {
+    "id": "state-inertia",
+    "type": "temporal_transform",
+    "inputs": ["scalar_sequence", "new_observable_candidate"],
+    "outputs": ["persistent_state"],
+    "capabilities": ["nonlinear_history_sensitive_state"],
+    "needs": ["detect_representation_collision", "prospective_falsification"],
+    "failure_modes": ["Nonlinear memory may not outperform instantaneous or ordinary linear memory."],
+    "assumptions": ["Ordered observations and fixed numerical parameters are available."],
+    "falsifiers": ["Held-out baselines equal or outperform it on the certified collision task."]
+  },
+  {
+    "id": "language-tower",
+    "type": "executable_semantic_substrate",
+    "inputs": ["grounded_primitive", "authorized_transition_receipt"],
+    "outputs": ["current_measurement_language", "refusal", "unknown"],
+    "capabilities": ["executable_grounding", "explicit_epistemic_boundary"],
+    "needs": ["detect_representation_collision", "external_admission"],
+    "failure_modes": ["A coarse language can collapse distinct worlds; a fine language can preserve nuisance distinctions."],
+    "assumptions": ["Primitive semantics and dependencies are explicit."],
+    "falsifiers": ["Independent implementations disagree on an allegedly grounded claim."]
+  },
+  {
+    "id": "orbita-falsifier",
+    "type": "epistemic_governor",
+    "inputs": ["language_limit_witness", "new_observable_candidate", "claim", "falsifier"],
+    "outputs": ["prospective_evaluation", "counterexample", "admission_candidate"],
+    "capabilities": ["prospective_falsification", "external_admission"],
+    "needs": ["executable_grounding"],
+    "failure_modes": ["Ingested evidence can be mistaken for a run performed by the live governed pipeline."],
+    "assumptions": ["Predictions are frozen before scoring evidence is available."],
+    "falsifiers": ["A candidate fails its frozen kill switch, negative control, or independent verification."]
+  },
+  {
+    "id": "derekx",
+    "type": "deterministic_transition_authority",
+    "inputs": ["admission_candidate", "prospective_evaluation", "authorized_transition_receipt"],
+    "outputs": ["grounded_primitive"],
+    "capabilities": ["hash_bound_semantic_transition"],
+    "needs": ["external_admission"],
+    "failure_modes": ["A mismatched receipt could install a different artifact unless every hash is checked."],
+    "assumptions": ["Runtime activation is separate from candidate generation and evaluation."],
+    "falsifiers": ["Any candidate, evaluation, parent-language, or authorization hash differs."]
+  }
+]
