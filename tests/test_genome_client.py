@@ -118,6 +118,33 @@ def test_http_error_body_is_not_exposed(monkeypatch):
     assert "private database detail" not in str(exc_info.value)
 
 
+def test_http_error_surfaces_only_an_allowlisted_public_error_code(monkeypatch):
+    client = DiscoveryGenomeClient(
+        DiscoveryGenomeConfig(
+            base_url="https://guided.example",
+            service_token="t" * 48,
+            username="derek",
+        )
+    )
+
+    def rejected_urlopen(*_args, **_kwargs):
+        return_error = HTTPError(
+            "https://guided.example",
+            422,
+            "Unprocessable Entity",
+            {},
+            BytesIO(
+                b'{"code":"invalid_prediction","error":"private validation detail"}'
+            ),
+        )
+        raise return_error
+
+    monkeypatch.setattr(genome_client, "urlopen", rejected_urlopen)
+    with pytest.raises(DiscoveryGenomeError, match=r"HTTP 422 \(invalid_prediction\)") as exc_info:
+        client.status()
+    assert "private validation detail" not in str(exc_info.value)
+
+
 def test_freeze_operator_is_bound_to_server_review_hash_and_phrase():
     review_hash = "a" * 64
     client = FakeGenomeClient(

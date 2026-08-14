@@ -6,7 +6,9 @@ import hashlib
 import io
 import json
 import math
+import os
 import sqlite3
+import stat
 import threading
 import uuid
 from datetime import UTC, datetime
@@ -21,6 +23,23 @@ REVEAL_APPROVAL_PHRASE = "I authorize reveal for this exact frozen prediction se
 PREDICTION_SCHEMA = "orbita-blind-predictions/1"
 PROTOCOL_SCHEMA = "orbita-blind-calibration/1"
 SCORE_SCHEMA = "orbita-blind-score/1"
+FREEZE_REPORT_SCHEMA = "orbita-blind-freeze-report/1"
+
+BLIND_COMPANION_KINDS = frozenset({"safety_falsification", "epistemic_falsification", "protocol_compliance"})
+SCORING_FILE_KEYS = frozenset(
+    {
+        "scoring_file_id",
+        "scoring_key_file_id",
+        "gold_file_id",
+        "gold_key_file_id",
+        "holdout_file_id",
+        "unresolved_holdout_file_id",
+        "resolution_file_id",
+    }
+)
+SENSITIVE_COLUMN_TOKENS = frozenset(
+    {"gold", "ground_truth", "scoring", "score_key", "resolution", "resolved_label", "holdout", "target_label"}
+)
 
 PREDICTION_DB_SCHEMA = """
 CREATE TABLE IF NOT EXISTS blind_protocols (
@@ -58,6 +77,16 @@ CREATE TABLE IF NOT EXISTS blind_access_events (
     FOREIGN KEY(protocol_id) REFERENCES blind_protocols(id)
 );
 
+CREATE TABLE IF NOT EXISTS blind_freeze_reports (
+    id TEXT PRIMARY KEY,
+    protocol_id TEXT NOT NULL UNIQUE,
+    run_id TEXT NOT NULL UNIQUE,
+    report_json TEXT NOT NULL,
+    report_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(protocol_id) REFERENCES blind_protocols(id)
+);
+
 CREATE TRIGGER IF NOT EXISTS blind_protocols_no_update
 BEFORE UPDATE ON blind_protocols BEGIN SELECT RAISE(ABORT, 'blind protocols are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS blind_protocols_no_delete
@@ -70,6 +99,10 @@ CREATE TRIGGER IF NOT EXISTS blind_access_events_no_update
 BEFORE UPDATE ON blind_access_events BEGIN SELECT RAISE(ABORT, 'blind access events are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS blind_access_events_no_delete
 BEFORE DELETE ON blind_access_events BEGIN SELECT RAISE(ABORT, 'blind access events are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS blind_freeze_reports_no_update
+BEFORE UPDATE ON blind_freeze_reports BEGIN SELECT RAISE(ABORT, 'blind freeze reports are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS blind_freeze_reports_no_delete
+BEFORE DELETE ON blind_freeze_reports BEGIN SELECT RAISE(ABORT, 'blind freeze reports are append-only'); END;
 """
 
 SCORING_DB_SCHEMA = """
@@ -172,6 +205,8 @@ def _candidate_value(candidate: dict[str, Any], plan: dict[str, Any], *names: st
     for name in names:
         if name in candidate:
             return candidate[name]
+        if name in plan:
+            return plan[name]
         if isinstance(calibration, dict) and name in calibration:
             return calibration[name]
     return None
@@ -227,6 +262,172 @@ def _read_inline_scoring_key(filename: str, content: str) -> pd.DataFrame:
     return frame
 
 
+def _normalized_tokens(value: Any) -> set[str]:
+    text = str(value or "").casefold()
+    for character in "-/:.,()[]{}":
+        text = text.replace(character, "_")
+    return {token for token in text.split("_") if token}
+
+
+def _sensitive_column(name: str) -> bool:
+    normalized = str(name).casefold().replace("-", "_").replace(" ", "_")
+    return any(token in normalized for token in SENSITIVE_COLUMN_TOKENS)
+
+
+def _scoring_filename(name: str) -> bool:
+    normalized = str(name).casefold().replace("-", "_").replace(" ", "_")
+    return any(
+        token in normalized
+        for token in ("scoring_key", "score_key", "gold_key", "ground_truth", "holdout", "resolution_key")
+    )
+
+
+def _requested_scoring_file(plan: dict[str, Any]) -> str | None:
+    """Return the first prediction-time scoring-file request, without opening a file."""
+
+    def walk(value: Any) -> str | None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if str(key).casefold() in SCORING_FILE_KEYS and item not in (None, "", []):
+                    return str(key)
+                nested = walk(item)
+                if nested:
+                    return nested
+        elif isinstance(value, list):
+            for item in value:
+                nested = walk(item)
+                if nested:
+                    return nested
+        return None
+
+    return walk(plan)
+
+
+def _pick_by_aliases(allowed: list[str], aliases: list[str]) -> str | None:
+    for alias in aliases:
+        alias_tokens = _normalized_tokens(alias)
+        for option in allowed:
+            option_tokens = _normalized_tokens(option)
+            if alias_tokens & option_tokens or alias.casefold() in option.casefold():
+                return option
+    return None
+
+
+def _deterministic_predictions(protocol: dict[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Generate conservative predictions from frozen visible rows only.
+
+    This intentionally performs no lookup and has no scoring-store dependency. It
+    is a generic vocabulary-constrained ruleset: direct visible family cues are
+    preferred, uncertainty and measurement alternatives are retained, and missing
+    measurement states determine requested evidence classes.
+    """
+
+    event_id_field = protocol["event_id_field"]
+    hypotheses = list(protocol["allowed_hypotheses"])
+    labels = list(protocol["allowed_epistemic_labels"])
+    evidence_classes = list(protocol["allowed_evidence_classes"])
+    results: list[dict[str, Any]] = []
+    missing_markers = {"unknown", "not", "public", "partial", "missing", "unavailable", "none"}
+
+    hypothesis_aliases = {
+        "aerostat": ["balloon", "wind_borne"],
+        "aircraft": ["aircraft", "prosaic_airborne"],
+        "infrared": ["sensor", "geometry", "artifact"],
+        "radar": ["aircraft", "drone"],
+        "satellite": ["satellite", "debris"],
+        "biological": ["bird", "biological"],
+        "bird": ["bird", "biological"],
+        "uas": ["drone", "uas"],
+        "drone": ["drone", "uas"],
+        "meteor": ["meteor", "atmospheric"],
+    }
+    evidence_aliases = {
+        "sensor_metadata": ["raw_sensor_metadata", "metadata"],
+        "platform_motion": ["platform_pose_motion", "motion"],
+        "range": ["range_geometry", "geometry"],
+        "radar": ["radar_kinematics", "radar"],
+        "weather": ["weather_wind", "weather"],
+        "adsb": ["ads_b", "aircraft_catalog"],
+        "satellite_catalog": ["satellite_catalog", "satellite"],
+    }
+
+    for row in rows:
+        selected_hypotheses: list[str] = []
+        visible_tokens = set().union(*(_normalized_tokens(value) for value in row.values()))
+        for cue, aliases in hypothesis_aliases.items():
+            if cue not in visible_tokens:
+                continue
+            match = _pick_by_aliases(hypotheses, aliases)
+            if match and match not in selected_hypotheses:
+                selected_hypotheses.append(match)
+        for aliases in (["sensor", "geometry", "artifact"], ["insufficient", "info"], ["other", "mundane"]):
+            if len(selected_hypotheses) >= 3:
+                break
+            match = _pick_by_aliases(hypotheses, aliases)
+            if match and match not in selected_hypotheses:
+                selected_hypotheses.append(match)
+        for option in hypotheses:
+            if len(selected_hypotheses) >= 3:
+                break
+            if option not in selected_hypotheses:
+                selected_hypotheses.append(option)
+
+        requested: list[str] = []
+        unknown_fields: list[str] = []
+        for field, value in row.items():
+            if field == event_id_field:
+                continue
+            tokens = _normalized_tokens(value)
+            if not (tokens & missing_markers):
+                continue
+            unknown_fields.append(field)
+            for cue, aliases in evidence_aliases.items():
+                if cue not in field.casefold():
+                    continue
+                match = _pick_by_aliases(evidence_classes, aliases)
+                if match and match not in requested:
+                    requested.append(match)
+                    break
+            if len(requested) >= 3:
+                break
+        for option in evidence_classes:
+            if len(requested) >= 3:
+                break
+            if option not in requested:
+                requested.append(option)
+
+        incomplete = bool(unknown_fields)
+        label_aliases = (
+            ["non_identifiable", "needs_measurement", "review_required"]
+            if incomplete
+            else ["resolved_mundane", "review_required"]
+        )
+        primary_label = _pick_by_aliases(labels, label_aliases) or labels[0]
+        completeness = sum(
+            1
+            for field, value in row.items()
+            if field != event_id_field and not (_normalized_tokens(value) & missing_markers)
+        ) / max(1, len(row) - 1)
+        confidence = round(min(0.65, max(0.2, 0.2 + 0.4 * completeness)), 3)
+        cited_fields = [field for field in row if field != event_id_field][:4]
+        missing_text = ", ".join(unknown_fields[:3]) or "no declared visible measurement gap"
+        results.append(
+            {
+                "blind_event_id": str(row[event_id_field]),
+                "surviving_hypotheses": selected_hypotheses[:3],
+                "primary_epistemic_label": primary_label,
+                "requested_evidence_classes": requested[:3],
+                "confidence": confidence,
+                "justification": (
+                    "Conservative rules used visible fields "
+                    + ", ".join(cited_fields)
+                    + f"; measurement gaps: {missing_text}."
+                ),
+            }
+        )
+    return results
+
+
 class BlindCalibrationService:
     """Two-store workflow whose prediction surface has no scoring-key read method."""
 
@@ -257,9 +458,7 @@ class BlindCalibrationService:
 
     def status(self) -> dict[str, Any]:
         protocols = self.prediction_conn.execute("SELECT COUNT(*) AS n FROM blind_protocols").fetchone()["n"]
-        freezes = self.prediction_conn.execute(
-            "SELECT COUNT(*) AS n FROM blind_prediction_freezes"
-        ).fetchone()["n"]
+        freezes = self.prediction_conn.execute("SELECT COUNT(*) AS n FROM blind_prediction_freezes").fetchone()["n"]
         scores = self.scoring_conn.execute("SELECT COUNT(*) AS n FROM blind_score_receipts").fetchone()["n"]
         return {
             "schema_version": PROTOCOL_SCHEMA,
@@ -285,47 +484,58 @@ class BlindCalibrationService:
             "SELECT id FROM blind_protocols WHERE plan_id = ?", (plan_id,)
         ).fetchone()
         if existing is not None:
-            return self.get(existing["id"])
+            return self._prediction_view(existing["id"])
         plan = plan_record["plan"]
+        scoring_request = _requested_scoring_file(plan)
+        if scoring_request:
+            raise ValueError(f"prediction-freeze mode forbids scoring-file request {scoring_request!r}")
         candidates = plan.get("candidates", [])
         blind_candidates = [item for item in candidates if item.get("kind") == PREDICTION_KIND]
-        if len(blind_candidates) != 1 or len(candidates) != 1:
+        companion_candidates = [item for item in candidates if item.get("kind") in BLIND_COMPANION_KINDS]
+        unsupported = [
+            str(item.get("kind"))
+            for item in candidates
+            if item.get("kind") not in ({PREDICTION_KIND} | BLIND_COMPANION_KINDS)
+        ]
+        if not blind_candidates or unsupported or len(blind_candidates) + len(companion_candidates) != len(candidates):
             raise ValueError(
-                "a prospective blind calibration plan must contain exactly one candidate and no mixed analysis kinds"
+                "a prospective blind calibration plan may contain blind gates and protocol/safety constraints only"
             )
         candidate = blind_candidates[0]
         selected = plan.get("selected_dataset", {})
-        file_id = str(
-            _candidate_value(candidate, plan, "blind_input_file_id")
-            or selected.get("file_id")
-            or ""
-        )
+        file_id = str(_candidate_value(candidate, plan, "blind_input_file_id") or selected.get("file_id") or "")
         file_record = self.research_service.store.get_file(file_id)
         if file_record["case_id"] != case_id:
             raise ValueError("blind_input_file_id does not belong to this case")
+        declared_name = str(selected.get("name") or "")
+        if _scoring_filename(file_record["original_name"]) or _scoring_filename(declared_name):
+            raise ValueError("prediction-freeze mode refuses a scoring or holdout file as blind input")
         extracted = file_record.get("extracted_path")
         if not extracted:
             raise ValueError("row-level materialization is unavailable for the selected blind input")
         frame = _read_table(Path(extracted))
+        sensitive_columns = sorted(str(column) for column in frame.columns if _sensitive_column(str(column)))
+        if sensitive_columns:
+            raise ValueError(
+                "blind input is not sanitized; prediction-freeze mode refuses scoring or holdout fields: "
+                + ", ".join(sensitive_columns)
+            )
 
-        event_id_field = str(
-            _candidate_value(candidate, plan, "blind_event_id_field") or "blind_event_id"
-        )
-        scoring_key_fields = _string_list(
+        event_id_field = str(_candidate_value(candidate, plan, "blind_event_id_field") or "blind_event_id")
+        scoring_key_fields_raw = _candidate_value(
+            candidate,
+            plan,
             "scoring_key_fields",
-            _candidate_value(
-                candidate,
-                plan,
-                "scoring_key_fields",
-                "hidden_fields",
-                "sealed_fields",
-            ),
+            "hidden_fields",
+            "sealed_fields",
+        )
+        scoring_key_fields = (
+            _string_list("scoring_key_fields", scoring_key_fields_raw) if scoring_key_fields_raw is not None else []
         )
         if any(field in frame.columns for field in scoring_key_fields):
             present = sorted(field for field in scoring_key_fields if field in frame.columns)
             raise ValueError(
-                "blind input contains declared scoring-key fields and is not sanitized: "
-                + ", ".join(present)
+                "blind input contains declared scoring-key fields and is not sanitized: " + ", ".join(present)
             )
         if event_id_field not in frame.columns:
             raise ValueError(f"blind input is missing event identifier field {event_id_field!r}")
@@ -351,6 +561,7 @@ class BlindCalibrationService:
             "allowed_hypotheses",
             _candidate_value(candidate, plan, "allowed_hypotheses", "hypothesis_vocabulary"),
         )
+        per_control = plan.get("per_control_output", {})
         allowed_labels = _string_list(
             "allowed_epistemic_labels",
             _candidate_value(
@@ -358,7 +569,8 @@ class BlindCalibrationService:
                 plan,
                 "allowed_epistemic_labels",
                 "epistemic_label_vocabulary",
-            ),
+            )
+            or (per_control.get("primary_epistemic_label") if isinstance(per_control, dict) else None),
         )
         allowed_evidence = _string_list(
             "allowed_evidence_classes",
@@ -371,51 +583,58 @@ class BlindCalibrationService:
             minimum=0,
         )
         forbidden_outputs_raw = _candidate_value(candidate, plan, "forbidden_outputs") or []
-        forbidden_outputs = _string_list(
-            "forbidden_outputs", forbidden_outputs_raw, minimum=0
-        )
-        scoring_schema = _candidate_value(candidate, plan, "scoring_schema")
-        if not isinstance(scoring_schema, dict) or not scoring_schema:
-            raise ValueError("prospective blind calibration requires a nonempty scoring_schema")
-        gold_id_field = str(scoring_schema.get("gold_event_id_field") or event_id_field)
-        gold_primary_field = _text(
-            "scoring_schema.gold_primary_label_field",
-            scoring_schema.get("gold_primary_label_field"),
-            maximum=160,
-        )
-        gold_hypotheses_field = scoring_schema.get("gold_acceptable_hypotheses_field")
-        if gold_hypotheses_field is not None:
-            gold_hypotheses_field = _text(
-                "scoring_schema.gold_acceptable_hypotheses_field",
-                gold_hypotheses_field,
+        forbidden_outputs = _string_list("forbidden_outputs", forbidden_outputs_raw, minimum=0)
+        scoring_schema_raw = _candidate_value(candidate, plan, "scoring_schema")
+        scoring_schema = None
+        if scoring_schema_raw is not None:
+            if not isinstance(scoring_schema_raw, dict) or not scoring_schema_raw:
+                raise ValueError("scoring_schema must be a nonempty object when declared")
+            gold_id_field = str(scoring_schema_raw.get("gold_event_id_field") or event_id_field)
+            gold_primary_field = _text(
+                "scoring_schema.gold_primary_label_field",
+                scoring_schema_raw.get("gold_primary_label_field"),
                 maximum=160,
             )
-        expected_rows = _candidate_value(candidate, plan, "expected_row_count")
+            gold_hypotheses_field = scoring_schema_raw.get("gold_acceptable_hypotheses_field")
+            if gold_hypotheses_field is not None:
+                gold_hypotheses_field = _text(
+                    "scoring_schema.gold_acceptable_hypotheses_field",
+                    gold_hypotheses_field,
+                    maximum=160,
+                )
+            scoring_schema = {
+                **scoring_schema_raw,
+                "gold_event_id_field": gold_id_field,
+                "gold_primary_label_field": gold_primary_field,
+                "gold_acceptable_hypotheses_field": gold_hypotheses_field,
+            }
+        expected_rows = _candidate_value(candidate, plan, "expected_row_count") or selected.get("rows")
         if expected_rows is not None and int(expected_rows) != len(frame):
             raise ValueError(
                 f"blind input contains {len(frame)} rows but the frozen plan requires {int(expected_rows)}"
             )
         visible_rows = [
-            {field: _json_value(row[field]) for field in visible_fields}
-            for _, row in frame[visible_fields].iterrows()
+            {field: _json_value(row[field]) for field in visible_fields} for _, row in frame[visible_fields].iterrows()
         ]
         provider_policy = _candidate_value(candidate, plan, "prediction_provider") or {
-            "kind": "external_submission"
+            "kind": "deterministic_rules",
+            "ruleset": "visible-field-conservative/1",
         }
         if not isinstance(provider_policy, dict) or provider_policy.get("kind") not in {
             "external_submission",
             "deterministic_rules",
         }:
-            raise ValueError(
-                "prediction_provider.kind must be external_submission or deterministic_rules"
-            )
+            raise ValueError("prediction_provider.kind must be external_submission or deterministic_rules")
         protocol = {
             "schema_version": PROTOCOL_SCHEMA,
             "case_id": case_id,
             "plan_id": plan_id,
             "plan_hash": plan_record["plan_hash"],
             "candidate_id": candidate["id"],
+            "candidate_ids": [item["id"] for item in blind_candidates],
             "candidate_statement": candidate["statement"],
+            "candidate_statements": [item["statement"] for item in blind_candidates],
+            "constraint_candidate_ids": [item["id"] for item in companion_candidates],
             "blind_input_file_id": file_id,
             "blind_input_hash": file_record["sha256"],
             "event_id_field": event_id_field,
@@ -428,12 +647,7 @@ class BlindCalibrationService:
             "allowed_evidence_classes": allowed_evidence,
             "forbidden_outputs": forbidden_outputs,
             "prediction_provider": provider_policy,
-            "scoring_schema": {
-                **scoring_schema,
-                "gold_event_id_field": gold_id_field,
-                "gold_primary_label_field": gold_primary_field,
-                "gold_acceptable_hypotheses_field": gold_hypotheses_field,
-            },
+            "scoring_schema": scoring_schema,
             "anti_leakage": {
                 "scoring_key_not_present_during_prediction": True,
                 "blind_input_has_no_declared_scoring_fields": True,
@@ -467,7 +681,7 @@ class BlindCalibrationService:
             )
             self._event(protocol_id, "PROTOCOL_FROZEN", {"protocol_hash": protocol_hash})
             self.prediction_conn.commit()
-        return self.get(protocol_id)
+        return self._prediction_view(protocol_id)
 
     def prediction_batch(self, protocol_id: str) -> dict[str, Any]:
         protocol = self._protocol(protocol_id)
@@ -505,6 +719,113 @@ class BlindCalibrationService:
             "scoring_key_available": False,
         }
 
+    def execute_from_approved_plan(self, case_id: str, plan_id: str) -> dict[str, Any]:
+        """Generate and freeze visible-only predictions without opening the scoring store."""
+
+        run_record = self.research_service.store.create_run(case_id, plan_id)
+        run_id = run_record["id"]
+        try:
+            prepared = self.prepare_from_approved_plan(case_id, plan_id)
+            if prepared["prediction_freeze"] is not None:
+                raise ValueError("predictions are already frozen for this approved plan")
+            batch = self.prediction_batch(prepared["id"])
+            protocol = prepared["protocol"]
+            predictions = _deterministic_predictions(protocol, batch["rows"])
+            expected = int(protocol["row_count"])
+            if len(predictions) != expected:
+                raise ValueError(
+                    f"dedicated blind executor generated {len(predictions)} predictions; exactly {expected} are required"
+                )
+            frozen = self.freeze_predictions(
+                prepared["id"],
+                expected_protocol_hash=prepared["protocol_hash"],
+                predictions=predictions,
+                provider={
+                    "kind": "deterministic_rules",
+                    "provider": "orbita-prospective-blind-executor",
+                    "ruleset": "visible-field-conservative/1",
+                    "external_lookup": False,
+                    "scoring_access": False,
+                },
+            )
+            freeze = frozen["prediction_freeze"]
+            report = {
+                "schema_version": FREEZE_REPORT_SCHEMA,
+                "run_id": run_id,
+                "case_id": case_id,
+                "plan_id": plan_id,
+                "plan_hash": protocol["plan_hash"],
+                "protocol_id": prepared["id"],
+                "protocol_hash": prepared["protocol_hash"],
+                "visible_rows_hash": prepared["visible_rows_hash"],
+                "prediction_freeze_hash": freeze["prediction_freeze_hash"],
+                "prediction_count": len(freeze["predictions"]),
+                "freeze_status": "frozen",
+                "provider": freeze["provider"],
+                "anti_leakage": {
+                    "visible_fields_only": True,
+                    "scoring_store_accessed": False,
+                    "external_lookup_used": False,
+                    "unresolved_holdout_accessed": False,
+                },
+            }
+            receipt = self._persist_freeze_report(prepared["id"], run_id, report)
+            run_dir = self.research_service.store.case_dir(case_id) / "runs" / run_id
+            report_dir = run_dir / "blind_calibration"
+            report_dir.mkdir(parents=True, exist_ok=True)
+            report_path = report_dir / "prediction_freeze_receipt.json"
+            report_path.write_text(_stable(report), encoding="utf-8")
+            if os.name != "nt":
+                try:
+                    os.chmod(report_path, stat.S_IREAD)
+                except OSError:
+                    pass
+            self.research_service.store.add_report(
+                case_id,
+                run_id,
+                format="blind_prediction_freeze_receipt",
+                path=str(report_path.resolve()),
+                content_hash=receipt["report_hash"],
+            )
+            result = {
+                "run_id": run_id,
+                "engine": "orbita-prospective-blind-calibration-executor/1",
+                "domain": "uploaded_blind_table",
+                "protocol_id": prepared["id"],
+                "protocol_hash": prepared["protocol_hash"],
+                "plan_hash": protocol["plan_hash"],
+                "candidate_count": len(protocol["candidate_ids"]),
+                "constraint_count": len(protocol["constraint_candidate_ids"]),
+                "prediction_count": len(freeze["predictions"]),
+                "freeze_status": "frozen",
+                "prediction_freeze_hash": freeze["prediction_freeze_hash"],
+                "freeze_receipt": receipt,
+                "scoring_accessed": False,
+                "scored": False,
+            }
+            return self.research_service.store.finish_run(
+                run_id,
+                result=result,
+                engine_run_id=run_id,
+                ledger_path=None,
+            )
+        except Exception as exc:
+            self.research_service.store.finish_run(
+                run_id,
+                result={
+                    "run_id": run_id,
+                    "engine": "orbita-prospective-blind-calibration-executor/1",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "scoring_accessed": False,
+                    "scored": False,
+                },
+                engine_run_id=run_id,
+                ledger_path=None,
+                status="failed",
+            )
+            raise
+
     def freeze_predictions(
         self,
         protocol_id: str,
@@ -522,24 +843,17 @@ class BlindCalibrationService:
             raise ValueError("provider must identify the model, ruleset, or human source")
         allowed_provider_kind = protocol["protocol"]["prediction_provider"]["kind"]
         if provider.get("kind") != allowed_provider_kind:
-            raise ValueError(
-                f"provider.kind must match the frozen prediction provider {allowed_provider_kind!r}"
-            )
+            raise ValueError(f"provider.kind must match the frozen prediction provider {allowed_provider_kind!r}")
         _stable(provider)
         if not isinstance(predictions, list) or len(predictions) != protocol["protocol"]["row_count"]:
-            raise ValueError(
-                f"prediction payload must contain exactly {protocol['protocol']['row_count']} rows"
-            )
+            raise ValueError(f"prediction payload must contain exactly {protocol['protocol']['row_count']} rows")
         allowed_hypotheses = set(protocol["protocol"]["allowed_hypotheses"])
         allowed_labels = set(protocol["protocol"]["allowed_epistemic_labels"])
         allowed_evidence = set(protocol["protocol"]["allowed_evidence_classes"])
         forbidden = [item.casefold() for item in protocol["protocol"]["forbidden_outputs"]]
         normalized: list[dict[str, Any]] = []
         seen: set[str] = set()
-        visible_by_id = {
-            str(row[protocol["protocol"]["event_id_field"]]): row
-            for row in protocol["visible_rows"]
-        }
+        visible_by_id = {str(row[protocol["protocol"]["event_id_field"]]): row for row in protocol["visible_rows"]}
         for raw in predictions:
             if not isinstance(raw, dict):
                 raise ValueError("every prediction must be an object")
@@ -549,14 +863,10 @@ class BlindCalibrationService:
             if event_id not in visible_by_id:
                 raise ValueError(f"prediction references unknown blind_event_id {event_id!r}")
             seen.add(event_id)
-            hypotheses = _string_list(
-                "surviving_hypotheses", raw.get("surviving_hypotheses"), minimum=1, maximum=3
-            )
+            hypotheses = _string_list("surviving_hypotheses", raw.get("surviving_hypotheses"), minimum=1, maximum=3)
             if not set(hypotheses) <= allowed_hypotheses:
                 raise ValueError("surviving_hypotheses contains a value outside the frozen vocabulary")
-            label = _text(
-                "primary_epistemic_label", raw.get("primary_epistemic_label"), maximum=500
-            )
+            label = _text("primary_epistemic_label", raw.get("primary_epistemic_label"), maximum=500)
             if label not in allowed_labels:
                 raise ValueError("primary_epistemic_label is outside the frozen vocabulary")
             evidence_classes = _string_list(
@@ -624,7 +934,7 @@ class BlindCalibrationService:
                 {"prediction_freeze_hash": freeze_hash, "row_count": len(normalized)},
             )
             self.prediction_conn.commit()
-        return self.get(protocol_id)
+        return self._prediction_view(protocol_id)
 
     def seal_scoring_key(
         self,
@@ -644,6 +954,8 @@ class BlindCalibrationService:
             "SELECT 1 FROM sealed_scoring_keys WHERE protocol_id = ?", (protocol_id,)
         ).fetchone():
             raise ValueError("the scoring key is immutable and already sealed")
+        if protocol["protocol"].get("scoring_schema") is None:
+            raise ValueError("the frozen plan does not declare a scoring schema; scoring-key access remains closed")
         frame = _read_inline_scoring_key(filename, content)
         schema = protocol["protocol"]["scoring_schema"]
         required = [schema["gold_event_id_field"], schema["gold_primary_label_field"]]
@@ -652,10 +964,7 @@ class BlindCalibrationService:
         missing = sorted(set(required) - set(frame.columns))
         if missing:
             raise ValueError("scoring key is missing required fields: " + ", ".join(missing))
-        rows = [
-            {column: _json_value(row[column]) for column in required}
-            for _, row in frame[required].iterrows()
-        ]
+        rows = [{column: _json_value(row[column]) for column in required} for _, row in frame[required].iterrows()]
         ids = [str(row[schema["gold_event_id_field"]]).strip() for row in rows]
         if len(set(ids)) != len(ids):
             raise ValueError("scoring-key event identifiers must be unique")
@@ -794,9 +1103,7 @@ class BlindCalibrationService:
                 elif raw is not None:
                     acceptable = [item.strip() for item in str(raw).split(delimiter) if item.strip()]
             hypothesis_hit = (
-                bool(set(prediction["surviving_hypotheses"]) & set(acceptable))
-                if hypotheses_field
-                else None
+                bool(set(prediction["surviving_hypotheses"]) & set(acceptable)) if hypotheses_field else None
             )
             row_results.append(
                 {
@@ -849,6 +1156,86 @@ class BlindCalibrationService:
         self._event(protocol_id, "SCORING_COMPLETED", {"score_hash": score_hash})
         self.prediction_conn.commit()
         return self.get(protocol_id)
+
+    def _persist_freeze_report(
+        self,
+        protocol_id: str,
+        run_id: str,
+        report: dict[str, Any],
+    ) -> dict[str, Any]:
+        report_hash = _hash(report)
+        with self._lock:
+            self.prediction_conn.execute(
+                """INSERT INTO blind_freeze_reports
+                   (id, protocol_id, run_id, report_json, report_hash, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    _id("blind_freeze_report"),
+                    protocol_id,
+                    run_id,
+                    _stable(report),
+                    report_hash,
+                    _now(),
+                ),
+            )
+            self._event(
+                protocol_id,
+                "FREEZE_REPORT_PERSISTED",
+                {"run_id": run_id, "report_hash": report_hash},
+            )
+            self.prediction_conn.commit()
+        return {
+            "schema_version": FREEZE_REPORT_SCHEMA,
+            "run_id": run_id,
+            "report_hash": report_hash,
+            "immutable": True,
+        }
+
+    def _prediction_view(self, protocol_id: str) -> dict[str, Any]:
+        """Return prediction state without issuing any query to the scoring database."""
+
+        protocol = self._protocol(protocol_id)
+        frozen = self._freeze(protocol_id)
+        report_row = self.prediction_conn.execute(
+            "SELECT * FROM blind_freeze_reports WHERE protocol_id = ?", (protocol_id,)
+        ).fetchone()
+        events = self.prediction_conn.execute(
+            "SELECT * FROM blind_access_events WHERE protocol_id = ? ORDER BY created_at, id",
+            (protocol_id,),
+        ).fetchall()
+        return {
+            "id": protocol_id,
+            "case_id": protocol["case_id"],
+            "plan_id": protocol["plan_id"],
+            "status": ("predictions_frozen_awaiting_scoring_key" if frozen is not None else "awaiting_predictions"),
+            "protocol": protocol["protocol"],
+            "protocol_hash": protocol["protocol_hash"],
+            "visible_rows_hash": protocol["visible_rows_hash"],
+            "prediction_freeze": frozen,
+            "freeze_receipt": (
+                {
+                    "run_id": report_row["run_id"],
+                    "report_hash": report_row["report_hash"],
+                    "immutable": True,
+                    "created_at": report_row["created_at"],
+                }
+                if report_row is not None
+                else None
+            ),
+            "sealed_scoring_key": None,
+            "reveal_approval": None,
+            "score": None,
+            "access_events": [
+                {
+                    "id": row["id"],
+                    "event_type": row["event_type"],
+                    "detail": json.loads(row["detail_json"]),
+                    "created_at": row["created_at"],
+                }
+                for row in events
+            ],
+            "scoring_key_available_to_prediction_surface": False,
+        }
 
     def get(self, protocol_id: str) -> dict[str, Any]:
         protocol = self._protocol(protocol_id)
@@ -922,9 +1309,7 @@ class BlindCalibrationService:
         }
 
     def _protocol(self, protocol_id: str) -> dict[str, Any]:
-        row = self.prediction_conn.execute(
-            "SELECT * FROM blind_protocols WHERE id = ?", (protocol_id,)
-        ).fetchone()
+        row = self.prediction_conn.execute("SELECT * FROM blind_protocols WHERE id = ?", (protocol_id,)).fetchone()
         if row is None:
             raise KeyError(f"Unknown blind calibration protocol: {protocol_id}")
         item = dict(row)

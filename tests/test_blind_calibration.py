@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 import pytest
 
 from orbita_agent.blind_calibration import REVEAL_APPROVAL_PHRASE
@@ -117,6 +120,81 @@ def _gold(rows: int = 10) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _executor_plan(file_record: dict, *, scoring_file_id: str | None = None) -> dict:
+    plan = {
+        "schema_version": "orbita-research-plan/0.1",
+        "status": "ready_for_review",
+        "selected_dataset": {
+            "file_id": file_record["id"],
+            "name": file_record["original_name"],
+            "sha256": file_record["sha256"],
+            "rows": 10,
+            "columns": 4,
+        },
+        "thresholds": {},
+        "allowed_hypotheses": [
+            "BALLOON",
+            "AIRCRAFT_OR_PROSAIC_AIRBORNE",
+            "SENSOR_GEOMETRY_ARTIFACT",
+            "INSUFFICIENT_INFO",
+        ],
+        "allowed_evidence_classes": [
+            "RAW_SENSOR_METADATA",
+            "PLATFORM_POSE_MOTION",
+            "RANGE_GEOMETRY",
+        ],
+        "per_control_output": {
+            "primary_epistemic_label": [
+                "RESOLVED_MUNDANE",
+                "SENSOR_OR_GEOMETRY_ARTIFACT",
+                "NON_IDENTIFIABLE_NEEDS_MEASUREMENT",
+                "REVIEW_REQUIRED",
+            ]
+        },
+        "candidates": [
+            {
+                "id": "blind-coverage",
+                "statement": "Freeze hypotheses for every visible control.",
+                "kind": "prospective_blind_calibration",
+            },
+            {
+                "id": "blind-evidence",
+                "statement": "Freeze evidence requests for every visible control.",
+                "kind": "prospective_blind_calibration",
+            },
+            {
+                "id": "anti-overclaim",
+                "statement": "Do not infer hidden outcomes.",
+                "kind": "epistemic_falsification",
+            },
+            {
+                "id": "clean-room",
+                "statement": "Do not access scoring or external lookup.",
+                "kind": "protocol_compliance",
+            },
+        ],
+    }
+    if scoring_file_id is not None:
+        plan["scoring_key_file_id"] = scoring_file_id
+    return plan
+
+
+def _prepare_executor_case(gateway, *, scoring_file_id: str | None = None):
+    case = gateway.create_case(name="Blind executor", goal="Freeze ten visible predictions")
+    file_record = gateway.add_inline_file(case_id=case["id"], filename="clean-room.tsv", content=_blind_tsv())
+    plan = gateway.submit_plan(
+        case["id"],
+        plan=_executor_plan(file_record, scoring_file_id=scoring_file_id),
+    )
+    approved = gateway.approve_plan(
+        plan["id"],
+        expected_plan_hash=plan["plan_hash"],
+        reviewer="clean-room-owner",
+        confirmation=APPROVAL_PHRASE,
+    )
+    return case, file_record, approved
+
+
 def test_ten_row_blind_workflow_freezes_before_key_and_scores_after_reveal(gateway):
     _, _, _, protocol = _prepare(gateway)
     assert protocol["status"] == "awaiting_predictions"
@@ -196,12 +274,92 @@ def test_ten_row_blind_workflow_freezes_before_key_and_scores_after_reveal(gatew
     assert scored["score"]["hypothesis_hit_rate"] == pytest.approx(0.8)
     assert scored["score"]["score_hash"]
     event_types = [event["event_type"] for event in scored["access_events"]]
-    assert event_types.index("PREDICTIONS_FROZEN") < event_types.index(
-        "SCORING_KEY_SEALED_AFTER_FREEZE"
+    assert event_types.index("PREDICTIONS_FROZEN") < event_types.index("SCORING_KEY_SEALED_AFTER_FREEZE")
+    assert event_types.index("SCORING_KEY_SEALED_AFTER_FREEZE") < event_types.index("REVEAL_APPROVED")
+
+
+def test_blind_executor_dispatch_bypasses_generic_table_runner_and_freezes_ten(gateway, monkeypatch):
+    case, _, approved = _prepare_executor_case(gateway)
+    original_hash = approved["plan_hash"]
+
+    def generic_runner_was_called(*args, **kwargs):
+        raise AssertionError("generic statistical table runner must not receive blind candidates")
+
+    monkeypatch.setattr(gateway.service, "run_case", generic_runner_was_called)
+    run = gateway.run_discovery(case["id"], plan_id=approved["id"])
+
+    assert run["status"] == "completed"
+    assert run["summary"]["engine"] == "orbita-prospective-blind-calibration-executor/1"
+    assert run["summary"]["prediction_count"] == 10
+    assert run["summary"]["freeze_status"] == "frozen"
+    assert run["summary"]["scoring_accessed"] is False
+    assert run["summary"]["scored"] is False
+    protocol = gateway.get_blind_calibration(run["summary"]["protocol_id"])
+    assert len(protocol["prediction_freeze"]["predictions"]) == 10
+    assert gateway.get_plan(approved["id"])["plan_hash"] == original_hash
+
+
+def test_blind_executor_persists_hashable_immutable_freeze_receipt(gateway):
+    case, _, approved = _prepare_executor_case(gateway)
+    run = gateway.run_discovery(case["id"], plan_id=approved["id"])
+    receipt = run["summary"]["freeze_receipt"]
+    assert receipt["immutable"] is True
+    assert len(receipt["report_hash"]) == 64
+
+    report = gateway.service.ledger.db.conn.execute(
+        "SELECT * FROM case_reports WHERE run_id = ? AND format = ?",
+        (run["id"], "blind_prediction_freeze_receipt"),
+    ).fetchone()
+    assert report is not None
+    payload = Path(report["path"]).read_bytes()
+    assert hashlib.sha256(payload).hexdigest() == receipt["report_hash"]
+    assert report["content_hash"] == receipt["report_hash"]
+    with pytest.raises(Exception, match="immutable"):
+        gateway.blind_calibration.prediction_conn.execute(
+            "UPDATE blind_freeze_reports SET report_hash = ? WHERE run_id = ?",
+            ("0" * 64, run["id"]),
+        )
+
+
+def test_blind_executor_never_queries_scoring_store_during_freeze(gateway):
+    case, _, approved = _prepare_executor_case(gateway)
+    original = gateway.blind_calibration.scoring_conn
+
+    class NoScoringAccess:
+        def execute(self, *args, **kwargs):
+            raise AssertionError("scoring store was accessed during prediction freeze")
+
+        def commit(self):
+            raise AssertionError("scoring store was committed during prediction freeze")
+
+        def close(self):
+            original.close()
+
+    gateway.blind_calibration.scoring_conn = NoScoringAccess()
+    run = gateway.run_discovery(case["id"], plan_id=approved["id"])
+    assert run["summary"]["prediction_count"] == 10
+    assert run["summary"]["scoring_accessed"] is False
+
+
+def test_blind_executor_fails_closed_on_prediction_time_scoring_file_request(gateway):
+    case, file_record, approved = _prepare_executor_case(gateway, scoring_file_id="file_private_scoring_key")
+    with pytest.raises(ValueError, match="forbids scoring-file request"):
+        gateway.run_discovery(case["id"], plan_id=approved["id"])
+    assert gateway.get_plan(approved["id"])["plan_hash"] == approved["plan_hash"]
+
+
+def test_blind_executor_fails_closed_when_selected_input_is_named_as_scoring_key(gateway):
+    case = gateway.create_case(name="Scoring key as input", goal="Refuse scoring input")
+    file_record = gateway.add_inline_file(case_id=case["id"], filename="private-scoring-key.tsv", content=_blind_tsv())
+    plan = gateway.submit_plan(case["id"], plan=_executor_plan(file_record))
+    approved = gateway.approve_plan(
+        plan["id"],
+        expected_plan_hash=plan["plan_hash"],
+        reviewer="clean-room-owner",
+        confirmation=APPROVAL_PHRASE,
     )
-    assert event_types.index("SCORING_KEY_SEALED_AFTER_FREEZE") < event_types.index(
-        "REVEAL_APPROVED"
-    )
+    with pytest.raises(ValueError, match="refuses a scoring or holdout file"):
+        gateway.run_discovery(case["id"], plan_id=approved["id"])
 
 
 def test_blind_input_containing_declared_gold_fields_is_rejected(gateway):
@@ -224,9 +382,7 @@ def test_blind_input_containing_declared_gold_fields_is_rejected(gateway):
 
 def test_missing_row_materialization_fails_clearly(gateway):
     case = gateway.create_case(name="Missing materialization", goal="Refuse missing rows")
-    file_record = gateway.add_inline_file(
-        case_id=case["id"], filename="blind.tsv", content=_blind_tsv()
-    )
+    file_record = gateway.add_inline_file(case_id=case["id"], filename="blind.tsv", content=_blind_tsv())
     gateway.service.ledger.db.conn.execute(
         "UPDATE case_files SET extracted_path = NULL WHERE id = ?", (file_record["id"],)
     )
@@ -258,16 +414,12 @@ def test_forbidden_semantic_output_cannot_be_frozen(gateway):
 
 def test_ordinary_discovery_still_rejects_unknown_candidate_kind_clearly(gateway, sample_csv):
     case = gateway.create_case(name="Unknown executor", goal="Fail clearly")
-    file_record = gateway.add_inline_file(
-        case_id=case["id"], filename="data.csv", content=sample_csv
-    )
+    file_record = gateway.add_inline_file(case_id=case["id"], filename="data.csv", content=sample_csv)
     plan_body = {
         "schema_version": "orbita-research-plan/0.1",
         "selected_dataset": {"file_id": file_record["id"]},
         "thresholds": {},
-        "candidates": [
-            {"id": "unknown-1", "statement": "Unsupported task", "kind": "unknown_executor"}
-        ],
+        "candidates": [{"id": "unknown-1", "statement": "Unsupported task", "kind": "unknown_executor"}],
     }
     plan = gateway.submit_plan(case["id"], plan=plan_body)
     approved = gateway.approve_plan(

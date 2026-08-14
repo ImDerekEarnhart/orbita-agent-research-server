@@ -11,11 +11,12 @@ from typing import Any
 import pandas as pd
 
 from orbita import guard_scope_escalation
+from orbita_discovery.core import CandidateNotScorable
 from orbita_mvp import ResearchMVP
 
 from . import __version__
 from .archive_policy import ArchivePolicy
-from .blind_calibration import PREDICTION_KIND, BlindCalibrationService
+from .blind_calibration import BLIND_COMPANION_KINDS, PREDICTION_KIND, BlindCalibrationService
 from .config import AgentConfig
 from .external_experiments import ExternalExperimentService
 from .graph_adapter import analyze_graph, export_lean_certificate
@@ -1022,15 +1023,37 @@ class AgentGateway:
                 raise ValueError("The plan does not belong to this case")
             if plan["status"] != "approved":
                 raise ValueError("The exact plan must be approved before execution")
-            kinds = {candidate.get("kind") for candidate in plan["plan"].get("candidates", [])}
+            plan_body = plan["plan"]
+            candidates = plan_body.get("candidates", [])
+            kinds = {candidate.get("kind") for candidate in candidates}
+            statistical_kinds = {"linear_association", "group_difference"}
+            if kinds and kinds <= statistical_kinds:
+                run = self.service.run_case(case_id, plan_id=plan_id, auto_approve=False)
+                return self._run_view(run, include_findings=True)
             if PREDICTION_KIND in kinds:
-                if kinds != {PREDICTION_KIND}:
-                    raise ValueError(
-                        "prospective blind calibration cannot share a plan with ordinary discovery candidates"
+                allowed = {PREDICTION_KIND} | BLIND_COMPANION_KINDS
+                if not kinds <= allowed:
+                    raise CandidateNotScorable(
+                        "prospective_blind_calibration cannot be mixed with statistical or unknown candidate kinds"
                     )
-                return self.blind_calibration.prepare_from_approved_plan(case_id, plan_id)
-            run = self.service.run_case(case_id, plan_id=plan_id, auto_approve=False)
-            return self._run_view(run, include_findings=True)
+                blind_policy = plan_body.get("blind_calibration", {})
+                provider = (
+                    blind_policy.get("prediction_provider") if isinstance(blind_policy, dict) else None
+                ) or plan_body.get("prediction_provider")
+                for candidate in candidates:
+                    if candidate.get("kind") == PREDICTION_KIND and candidate.get("prediction_provider"):
+                        provider = candidate["prediction_provider"]
+                        break
+                if isinstance(provider, dict) and provider.get("kind") == "external_submission":
+                    return self.blind_calibration.prepare_from_approved_plan(case_id, plan_id)
+                run = self.blind_calibration.execute_from_approved_plan(case_id, plan_id)
+                return self._run_view(run, include_findings=False)
+            unsupported = ", ".join(sorted(repr(kind) for kind in kinds)) or "no candidate kind"
+            raise CandidateNotScorable(
+                "the execution dispatch cannot fit a candidate of kind "
+                f"{unsupported}; supported kinds are linear_association, group_difference, "
+                "and prospective_blind_calibration"
+            )
 
     def blind_calibration_status(self) -> dict[str, Any]:
         with self._lock:
@@ -1137,6 +1160,16 @@ class AgentGateway:
                 "reports",
                 "error_type",
                 "error",
+                "protocol_id",
+                "protocol_hash",
+                "plan_hash",
+                "constraint_count",
+                "prediction_count",
+                "freeze_status",
+                "prediction_freeze_hash",
+                "freeze_receipt",
+                "scoring_accessed",
+                "scored",
             )
             if key in result
         }

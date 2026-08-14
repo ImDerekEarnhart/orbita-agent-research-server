@@ -13,6 +13,14 @@ from urllib.request import Request, urlopen
 OPERATOR_FREEZE_PHRASE = "I reviewed this exact discovery operator"
 TOURNAMENT_FREEZE_PHRASE = "I reviewed this exact blind tournament"
 RESULT_RECORD_PHRASE = "I reviewed this exact tournament result"
+SAFE_GENOME_ERROR_CODES = frozenset(
+    {
+        "invalid_prediction",
+        "duplicate_operator_entry",
+        "attachment_target_not_found",
+        "attachment_conflict",
+    }
+)
 
 
 class DiscoveryGenomeError(RuntimeError):
@@ -124,8 +132,21 @@ class DiscoveryGenomeClient:
                 raw = response.read().decode("utf-8")
                 return json.loads(raw) if raw else {}
         except HTTPError as exc:
-            exc.close()
-            raise DiscoveryGenomeError(f"Discovery Genome service request failed with HTTP {exc.code}") from exc
+            safe_code = ""
+            try:
+                raw_error = exc.read(8_192).decode("utf-8")
+                error_body = json.loads(raw_error) if raw_error else {}
+                candidate = str(error_body.get("code") or "") if isinstance(error_body, dict) else ""
+                if candidate in SAFE_GENOME_ERROR_CODES:
+                    safe_code = candidate
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                pass
+            finally:
+                exc.close()
+            suffix = f" ({safe_code})" if safe_code else ""
+            raise DiscoveryGenomeError(
+                f"Discovery Genome service request failed with HTTP {exc.code}{suffix}"
+            ) from exc
         except OSError as exc:
             raise DiscoveryGenomeError("Discovery Genome service is unavailable") from exc
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
