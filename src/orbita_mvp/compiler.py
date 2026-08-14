@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -124,9 +125,46 @@ class ResearchCompiler:
         missing = sorted(required - set(plan))
         if missing:
             raise ValueError(f"Plan is missing required fields: {', '.join(missing)}")
-        file_ids = {item["id"] for item in case.get("files", [])}
-        if plan["selected_dataset"].get("file_id") not in file_ids:
+        plan = deepcopy(plan)
+        selected = plan.get("selected_dataset")
+        if not isinstance(selected, dict):
+            raise ValueError("selected_dataset must be an object")
+        files = case.get("files", [])
+        selected_file = next(
+            (item for item in files if item.get("id") == selected.get("file_id")),
+            None,
+        )
+        if selected.get("file_id") is not None and selected_file is None:
             raise ValueError("selected_dataset.file_id does not belong to this case")
+        if selected_file is None:
+            dataset_hash = selected.get("sha256")
+            if not isinstance(dataset_hash, str) or not dataset_hash.strip():
+                raise ValueError(
+                    "selected_dataset requires either a case-owned file_id or sha256 for exact case-owned resolution"
+                )
+            matches = [item for item in files if item.get("sha256") == dataset_hash]
+            dataset_name = selected.get("name")
+            if dataset_name is not None:
+                matches = [
+                    item
+                    for item in matches
+                    if item.get("original_name", item.get("name")) == dataset_name
+                ]
+            if len(matches) != 1:
+                reason = "was not found" if not matches else "is ambiguous"
+                raise ValueError(
+                    f"selected_dataset sha256/name {reason} within this case; exact case-owned resolution is required"
+                )
+            selected_file = matches[0]
+            selected["file_id"] = selected_file["id"]
+        if selected.get("sha256") not in (None, selected_file.get("sha256")):
+            raise ValueError("selected_dataset.sha256 does not match its case-owned file")
+        expected_name = selected_file.get("original_name", selected_file.get("name"))
+        if selected.get("name") not in (None, expected_name):
+            raise ValueError("selected_dataset.name does not match its case-owned file")
+        selected.setdefault("sha256", selected_file.get("sha256"))
+        if expected_name is not None:
+            selected.setdefault("name", expected_name)
         seen: set[str] = set()
         for candidate in plan.get("candidates", []):
             for field in ("id", "statement", "kind"):

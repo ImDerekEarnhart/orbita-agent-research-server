@@ -135,6 +135,38 @@ def test_research_operator_routes_to_governed_external_preparation_and_receipt(g
         )
 
 
+def test_external_plan_resolves_case_dataset_by_hash_without_proxy_file_id(gateway, sample_csv):
+    case = gateway.create_case(name="Proxy-safe plan", goal="Resolve a case-owned dataset without a transported file ID")
+    file_record = gateway.add_inline_file(case_id=case["id"], filename="data.csv", content=sample_csv)
+    plan_body = _research_plan(file_record)
+    plan_body["selected_dataset"] = {
+        "name": file_record["original_name"],
+        "sha256": file_record["sha256"],
+    }
+
+    plan = gateway.submit_plan(case["id"], plan=plan_body)
+
+    assert plan["status"] == "proposed"
+    assert plan["plan"]["selected_dataset"]["file_id"] == file_record["id"]
+    assert plan["plan"]["selected_dataset"]["sha256"] == file_record["sha256"]
+    assert plan["plan"]["execution_binding"]["input_artifact"]["file_id"] == file_record["id"]
+
+
+def test_external_plan_hash_resolution_fails_closed_on_mismatch(gateway, sample_csv):
+    case = gateway.create_case(name="Proxy-safe rejection", goal="Reject ungrounded dataset references")
+    file_record = gateway.add_inline_file(case_id=case["id"], filename="data.csv", content=sample_csv)
+    plan_body = _research_plan(file_record)
+    plan_body["selected_dataset"] = {
+        "name": file_record["original_name"],
+        "sha256": "0" * 64,
+    }
+
+    with pytest.raises(ValueError, match="was not found within this case"):
+        gateway.submit_plan(case["id"], plan=plan_body)
+
+    assert gateway.service.store.get_case(case["id"])["plans"] == []
+
+
 def test_mixed_semantics_and_known_unavailable_kinds_fail_closed_at_compilation(gateway, sample_csv):
     case = gateway.create_case(name="No coercion", goal="Reject ambiguous execution semantics")
     file_record = gateway.add_inline_file(case_id=case["id"], filename="data.csv", content=sample_csv)
