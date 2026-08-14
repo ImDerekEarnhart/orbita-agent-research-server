@@ -102,6 +102,40 @@ def test_guided_surface_and_mcp_share_one_tenant_gateway(gateway, monkeypatch, s
         assert temporal.json()["admission_decision"] == "none"
         assert temporal.json()["candidate_results"][0]["name"] == "lag"
 
+        problem_loop = client.post(
+            "/guided/v1/problem-loops",
+            headers=_headers(),
+            json={
+                "goal": "Determine whether a bounded claim survives its frozen checks.",
+                "success_criteria": ["Every check passes"],
+                "allowed_capabilities": ["finite_checker"],
+                "max_cycles": 1,
+                "created_by": "guided-test",
+            },
+        )
+        assert problem_loop.status_code == 201, problem_loop.text
+        loop = problem_loop.json()
+        assert loop["current_state"] == "REPRESENT"
+        advanced = client.post(
+            f"/guided/v1/problem-loops/{loop['id']}/advance",
+            headers=_headers(),
+            json={
+                "expected_state": "REPRESENT",
+                "expected_previous_event_hash": loop["latest_event_hash"],
+                "artifact": {
+                    "problem_representation": "A finite claim evaluated over explicit worlds.",
+                    "assumptions": [],
+                    "unknowns": ["Whether a counterexample exists"],
+                },
+                "actor": "guided-test-model",
+            },
+        )
+        assert advanced.status_code == 200, advanced.text
+        assert advanced.json()["current_state"] == "PLAN"
+        verified = client.get(f"/guided/v1/problem-loops/{loop['id']}/verify", headers=_headers())
+        assert verified.status_code == 200
+        assert verified.json()["valid"] is True
+
         uploaded = client.post(
             f"/guided/v1/cases/{case_id}/files",
             headers=_headers(),

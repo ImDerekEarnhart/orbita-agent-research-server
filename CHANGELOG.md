@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0 - 2026-08-14
+
+- Added a tenant-scoped, append-only General Problem Loop for arbitrary bounded objectives.
+- Enforced the `GOAL -> REPRESENT -> PLAN -> ACT -> OBSERVE -> FALSIFY -> DIAGNOSE -> REPAIR/LEARN -> RETRY ->
+  COMMIT/REFUSE` lifecycle with deterministic branching and frozen retry budgets.
+- Added artifact schemas, exact previous-event hashes, hash-chain verification, language-limit certificate requirements,
+  action-receipt requirements, and fail-closed self-activation rejection.
+- Exposed safe create/read/advance/verify operations through MCP, the Guided internal API, and Guided hybrid chat.
+
+
 ## 0.6.0 - 2026-08-14
 
 - Added canonical, inert Language Snapshots covering primitives, observables, epistemic boundaries, permissions, and

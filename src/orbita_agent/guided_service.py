@@ -276,6 +276,60 @@ def install_guided_service_routes(
         except Exception as exc:  # noqa: BLE001
             return failure(exc)
 
+    @mcp.custom_route(f"{GUIDED_API_PREFIX}/problem-loops", methods=["GET", "POST"], include_in_schema=False)
+    async def guided_problem_loops(request: Request) -> JSONResponse:
+        try:
+            gateway = bound(request)
+            if request.method == "GET":
+                return JSONResponse({"loops": gateway.list_general_problem_loops()})
+            body = await _json(request)
+            return JSONResponse(
+                gateway.create_general_problem_loop(
+                    goal=str(body.get("goal") or ""),
+                    success_criteria=body.get("success_criteria"),
+                    allowed_capabilities=body.get("allowed_capabilities"),
+                    max_cycles=int(body.get("max_cycles", 3)),
+                    created_by=str(body.get("created_by") or "guided-hybrid"),
+                ),
+                status_code=201,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(f"{GUIDED_API_PREFIX}/problem-loops/{{loop_id}}", methods=["GET"], include_in_schema=False)
+    async def guided_problem_loop(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse(bound(request).get_general_problem_loop(request.path_params["loop_id"]))
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/problem-loops/{{loop_id}}/advance", methods=["POST"], include_in_schema=False
+    )
+    async def guided_advance_problem_loop(request: Request) -> JSONResponse:
+        try:
+            body = await _json(request)
+            return JSONResponse(
+                bound(request).advance_general_problem_loop(
+                    request.path_params["loop_id"],
+                    expected_state=str(body.get("expected_state") or ""),
+                    expected_previous_event_hash=str(body.get("expected_previous_event_hash") or ""),
+                    artifact=body.get("artifact"),
+                    actor=str(body.get("actor") or "guided-hybrid"),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/problem-loops/{{loop_id}}/verify", methods=["GET"], include_in_schema=False
+    )
+    async def guided_verify_problem_loop(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse(bound(request).verify_general_problem_loop(request.path_params["loop_id"]))
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
     @mcp.custom_route(f"{GUIDED_API_PREFIX}/memory/status", methods=["GET"], include_in_schema=False)
     async def guided_memory_status(request: Request) -> JSONResponse:
         try:

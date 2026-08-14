@@ -195,6 +195,13 @@ The companion capability-component graph converts archived ideas into typed inpu
 failure modes, assumptions, and falsifiers. Its edges assert interface matches only—not scientific validity or successful
 composition.
 
+### General Problem Loop
+
+Orbita can freeze an arbitrary objective into an append-only state machine covering representation, planning, executor
+receipts, observation, falsification, diagnosis, inactive repair/learning proposals, bounded retries, and evidence-bound
+commit or refusal. The attached model supplies proposals; Orbita validates each stage and controls every transition.
+See [docs/GENERAL_PROBLEM_LOOP.md](docs/GENERAL_PROBLEM_LOOP.md).
+
 Orbita can learn from completed cases without rewriting its own code. The improvement lab can change only a small
 allowlist of research-policy values: candidate budget, scout split, deterministic seed, judge thresholds, and
 cross-seed falsification settings.

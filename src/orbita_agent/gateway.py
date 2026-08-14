@@ -19,6 +19,7 @@ from .archive_policy import ArchivePolicy
 from .blind_calibration import BLIND_COMPANION_KINDS, PREDICTION_KIND, BlindCalibrationService
 from .config import AgentConfig
 from .external_experiments import ExternalExperimentService
+from .general_problem_loop import GeneralProblemLoopService
 from .graph_adapter import analyze_graph, export_lean_certificate
 from .improvement import PROMOTION_PHRASE, ROLLBACK_PHRASE, ImprovementLab
 from .improvement_registry import ImprovementRegistry
@@ -65,6 +66,7 @@ class AgentGateway:
             self.config.blind_scoring_db,
             self.service,
         )
+        self.general_problem_loops = GeneralProblemLoopService(self.config.general_problem_loop_db)
         self.memory = MemoryIndex(self.config.memory_db)
         self.objects = build_object_store(self.config.home / "objects")
         self._lock = threading.RLock()
@@ -83,6 +85,7 @@ class AgentGateway:
         for child in children:
             child.close()
         self.memory.close()
+        self.general_problem_loops.close()
         self.blind_calibration.close()
         self.external_experiments.close()
         self.improvement_registry.close()
@@ -124,6 +127,7 @@ class AgentGateway:
                 "prospective blind calibration with prediction-before-reveal scoring",
                 "hash-bound language snapshots, finite representation audits, and inert semantic transitions",
                 "typed capability-component graphs for archive synthesis",
+                "append-only General Problem Loops with hash-chained evidence and bounded retries",
             ],
             "approval_phrase": APPROVAL_PHRASE,
             "deletion_phrase": DELETION_PHRASE,
@@ -142,6 +146,7 @@ class AgentGateway:
             "archive_processing": self.service.ingestor.describe(),
             "external_experiments": self.external_experiments.status(),
             "blind_calibration": self.blind_calibration.status(),
+            "general_problem_loop": self.general_problem_loops.status(),
             "knowledge": knowledge,
             "boundaries": [
                 "Surviving a configured gauntlet is not universal proof, causality, or novelty.",
@@ -151,9 +156,62 @@ class AgentGateway:
                 "Self-improvement changes allowlisted research-policy values only and never promotes itself.",
                 "General improvement candidates can be frozen and evaluated, but cannot activate themselves.",
                 "Language transitions create inert snapshots and receipts; they never patch or activate this runtime.",
+                "The General Problem Loop records executor receipts but cannot autonomously execute external actions.",
                 "Deterministic execution integrity is reported separately from scientific validity.",
             ],
         }
+
+    def create_general_problem_loop(
+        self,
+        *,
+        goal: str,
+        success_criteria: list[str],
+        allowed_capabilities: list[str],
+        max_cycles: int = 3,
+        created_by: str = "user",
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.general_problem_loops.create(
+                goal=goal,
+                success_criteria=success_criteria,
+                allowed_capabilities=allowed_capabilities,
+                max_cycles=max_cycles,
+                created_by=created_by,
+            )
+
+    def general_problem_loop_status(self) -> dict[str, Any]:
+        with self._lock:
+            return self.general_problem_loops.status()
+
+    def list_general_problem_loops(self, *, limit: int = 25) -> list[dict[str, Any]]:
+        with self._lock:
+            return self.general_problem_loops.list(limit=limit)
+
+    def get_general_problem_loop(self, loop_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.general_problem_loops.get(loop_id)
+
+    def advance_general_problem_loop(
+        self,
+        loop_id: str,
+        *,
+        expected_state: str,
+        expected_previous_event_hash: str,
+        artifact: dict[str, Any],
+        actor: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.general_problem_loops.submit(
+                loop_id,
+                expected_state=expected_state,
+                expected_previous_event_hash=expected_previous_event_hash,
+                artifact=artifact,
+                actor=actor,
+            )
+
+    def verify_general_problem_loop(self, loop_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.general_problem_loops.verify_chain(loop_id)
 
     @staticmethod
     def _case_view(case: dict[str, Any]) -> dict[str, Any]:

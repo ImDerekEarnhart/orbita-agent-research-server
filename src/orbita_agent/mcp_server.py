@@ -888,6 +888,63 @@ def build_mcp_server(
         """Compare fixed temporal operators on exact present-only collisions without fitting or admission."""
         return audit_temporal_unaskability(histories, candidates, tolerance=tolerance)
 
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_general_problem_loop_status() -> dict[str, Any]:
+        """Describe the governed problem-solving state machine and its non-activation boundary."""
+        return _gateway_for_caller().general_problem_loop_status()
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_create_general_problem_loop(
+        goal: str,
+        success_criteria: list[str],
+        allowed_capabilities: list[str],
+        max_cycles: int = 3,
+        created_by: str = "user",
+    ) -> dict[str, Any]:
+        """Freeze an arbitrary objective, success criteria, capabilities, and bounded retry budget."""
+        return _gateway_for_caller().create_general_problem_loop(
+            goal=goal,
+            success_criteria=success_criteria,
+            allowed_capabilities=allowed_capabilities,
+            max_cycles=max_cycles,
+            created_by=created_by,
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_list_general_problem_loops(limit: int = 25) -> list[dict[str, Any]]:
+        """List the caller's problem loops without exposing another tenant's state."""
+        return _gateway_for_caller().list_general_problem_loops(limit=limit)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_get_general_problem_loop(loop_id: str) -> dict[str, Any]:
+        """Read one loop's exact current state and append-only, hash-chained event history."""
+        return _gateway_for_caller().get_general_problem_loop(loop_id)
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_advance_general_problem_loop(
+        loop_id: str,
+        expected_state: str,
+        expected_previous_event_hash: str,
+        artifact: dict[str, Any],
+        actor: str,
+    ) -> dict[str, Any]:
+        """Submit one stage artifact; Orbita validates it and chooses the only admissible next state.
+
+        This records completed executor receipts but does not execute tools or activate repairs.
+        """
+        return _gateway_for_caller().advance_general_problem_loop(
+            loop_id,
+            expected_state=expected_state,
+            expected_previous_event_hash=expected_previous_event_hash,
+            artifact=artifact,
+            actor=actor,
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_verify_general_problem_loop(loop_id: str) -> dict[str, Any]:
+        """Verify every artifact hash and event-chain link in one General Problem Loop."""
+        return _gateway_for_caller().verify_general_problem_loop(loop_id)
+
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_compile_plan(case_id: str, max_candidates: int | None = None) -> dict[str, Any]:
         """Compile with the active policy; optionally override only the bounded candidate budget."""

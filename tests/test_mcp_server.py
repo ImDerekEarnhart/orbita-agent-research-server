@@ -38,6 +38,12 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
         "orbita_materialize_language_transition",
         "orbita_build_capability_component_graph",
         "orbita_audit_temporal_unaskability",
+        "orbita_general_problem_loop_status",
+        "orbita_create_general_problem_loop",
+        "orbita_list_general_problem_loops",
+        "orbita_get_general_problem_loop",
+        "orbita_advance_general_problem_loop",
+        "orbita_verify_general_problem_loop",
         "orbita_compile_plan",
         "orbita_approve_plan",
         "orbita_run_discovery",
@@ -110,6 +116,12 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
     assert tools["orbita_materialize_language_transition"].annotations.readOnlyHint is True
     assert tools["orbita_build_capability_component_graph"].annotations.readOnlyHint is True
     assert tools["orbita_audit_temporal_unaskability"].annotations.readOnlyHint is True
+    assert tools["orbita_general_problem_loop_status"].annotations.readOnlyHint is True
+    assert tools["orbita_create_general_problem_loop"].annotations.destructiveHint is False
+    assert tools["orbita_list_general_problem_loops"].annotations.readOnlyHint is True
+    assert tools["orbita_get_general_problem_loop"].annotations.readOnlyHint is True
+    assert tools["orbita_advance_general_problem_loop"].annotations.destructiveHint is False
+    assert tools["orbita_verify_general_problem_loop"].annotations.readOnlyHint is True
     assert tools["orbita_approve_plan"].annotations.destructiveHint is True
     assert tools["orbita_run_discovery"].annotations.destructiveHint is True
     assert tools["orbita_promote_improvement"].annotations.destructiveHint is True
@@ -151,7 +163,7 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
 
 def test_runtime_version_metadata_matches_package(gateway, monkeypatch):
     monkeypatch.setattr(gateway.knowledge, "status", lambda: {})
-    assert gateway.capabilities()["version"] == __version__ == "0.6.0"
+    assert gateway.capabilities()["version"] == __version__ == "0.7.0"
 
 
 def test_capabilities_executes_through_the_real_mcp_surface(gateway, monkeypatch):
@@ -220,6 +232,26 @@ def test_language_snapshot_executes_through_real_mcp_surface(gateway):
     assert snapshot["schema"] == "orbita-language-snapshot/1"
     assert snapshot["active"] is False
     assert len(snapshot["snapshot_hash"]) == 64
+
+
+def test_general_problem_loop_executes_through_real_mcp_surface(gateway):
+    mcp, _ = build_mcp_server(gateway=gateway)
+    _content, loop = asyncio.run(
+        mcp.call_tool(
+            "orbita_create_general_problem_loop",
+            {
+                "goal": "Determine whether a finite claim survives its frozen checks.",
+                "success_criteria": ["All checks pass"],
+                "allowed_capabilities": ["finite_checker"],
+                "max_cycles": 1,
+                "created_by": "mcp-test",
+            },
+        )
+    )
+    assert loop["current_state"] == "REPRESENT"
+    assert loop["activation_enabled"] is False
+    _content, verified = asyncio.run(mcp.call_tool("orbita_verify_general_problem_loop", {"loop_id": loop["id"]}))
+    assert verified["valid"] is True
 
 
 def test_adjudication_tool_executes_through_the_real_mcp_surface(gateway):
