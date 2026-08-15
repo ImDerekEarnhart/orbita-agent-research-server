@@ -111,6 +111,8 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
         "orbita_genome_freeze_operator",
         "orbita_genome_create_tournament",
         "orbita_genome_freeze_tournament",
+        "orbita_genome_hash_tournament_reveal",
+        "orbita_genome_mark_tournament_revealed",
         "orbita_genome_record_result",
     }
     assert expected <= tools.keys()
@@ -174,6 +176,7 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
     assert tools["orbita_genome_generate_questions"].annotations.readOnlyHint is False
     assert tools["orbita_genome_freeze_operator"].annotations.destructiveHint is True
     assert tools["orbita_genome_freeze_tournament"].annotations.destructiveHint is True
+    assert tools["orbita_genome_mark_tournament_revealed"].annotations.destructiveHint is True
     assert tools["orbita_genome_record_result"].annotations.destructiveHint is True
     assert tools["orbita_approve_plan"].description
     assert tools["orbita_blind_calibration_status"].annotations.readOnlyHint is True
@@ -212,6 +215,12 @@ def test_mcp_schemas_are_machine_usable(gateway):
     assert graph["properties"]["edges"]["type"] == "array"
     genome_hash = tools["orbita_genome_hash_result"].parameters
     assert set(genome_hash["required"]) == {"tournament_id", "entry_id", "verdict", "result"}
+    genome_reveal_hash = tools["orbita_genome_hash_tournament_reveal"].parameters
+    assert set(genome_reveal_hash["required"]) == {
+        "tournament_id",
+        "expected_manifest_hash",
+        "reveal",
+    }
     adjudication = tools["orbita_adjudicate_epistemic_task"].parameters
     assert set(adjudication["required"]) == {"task"}
     assert adjudication["properties"]["task"]["type"] == "object"

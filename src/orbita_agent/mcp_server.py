@@ -30,10 +30,12 @@ from .genome_client import (
     OPERATOR_FREEZE_PHRASE,
     RESULT_RECORD_PHRASE,
     TOURNAMENT_FREEZE_PHRASE,
+    TOURNAMENT_REVEAL_PHRASE,
     DiscoveryGenomeClient,
     DiscoveryGenomeError,
     hash_json,
     tournament_result_receipt,
+    tournament_reveal_receipt,
 )
 from .guided_service import install_guided_service_routes
 from .oauth import ORBITA_SCOPE, GitHubOAuthProvider
@@ -467,6 +469,7 @@ def build_mcp_server(
             "approval_phrases": {
                 "freeze_operator": OPERATOR_FREEZE_PHRASE,
                 "freeze_tournament": TOURNAMENT_FREEZE_PHRASE,
+                "mark_tournament_revealed": TOURNAMENT_REVEAL_PHRASE,
                 "record_result": RESULT_RECORD_PHRASE,
             },
             "safety": {
@@ -652,6 +655,33 @@ def build_mcp_server(
             expected_result_hash=expected_result_hash,
             confirmation=confirmation,
         )
+
+    @mcp.tool(annotations=STATE_CHANGE, structured_output=True)
+    def orbita_genome_mark_tournament_revealed(
+        tournament_id: str,
+        expected_manifest_hash: str,
+        reveal: dict[str, Any],
+        confirmation: str,
+        expected_reveal_hash: str | None = None,
+    ) -> dict[str, Any]:
+        """Record that an externally committed frozen tournament has been revealed without changing its manifest."""
+        return _genome_for_caller().mark_tournament_revealed(
+            tournament_id,
+            expected_manifest_hash=expected_manifest_hash,
+            reveal=reveal,
+            expected_reveal_hash=expected_reveal_hash,
+            confirmation=confirmation,
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_genome_hash_tournament_reveal(
+        tournament_id: str,
+        expected_manifest_hash: str,
+        reveal: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Hash the exact external reveal receipt before marking a frozen tournament revealed."""
+        reviewed_reveal = tournament_reveal_receipt(tournament_id, expected_manifest_hash, reveal)
+        return {"reveal_hash": hash_json(reviewed_reveal), **reviewed_reveal}
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_genome_hash_result(

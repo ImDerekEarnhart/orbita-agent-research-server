@@ -10,11 +10,13 @@ from orbita_agent.genome_client import (
     OPERATOR_FREEZE_PHRASE,
     RESULT_RECORD_PHRASE,
     TOURNAMENT_FREEZE_PHRASE,
+    TOURNAMENT_REVEAL_PHRASE,
     DiscoveryGenomeClient,
     DiscoveryGenomeConfig,
     DiscoveryGenomeError,
     hash_json,
     tournament_result_receipt,
+    tournament_reveal_receipt,
 )
 
 
@@ -222,6 +224,64 @@ def test_result_requires_exact_target_payload_hash_and_confirmation():
     assert client.calls[0][2]["expected_result_hash"] == result_hash
 
 
+def test_reveal_requires_exact_manifest_hash_receipt_and_confirmation():
+    reveal = {"external_commitment": "benchmark revealed", "source": "external scorer"}
+    manifest_hash = "7" * 64
+    reveal_hash = hash_json(tournament_reveal_receipt("tour-1", manifest_hash, reveal))
+    client = FakeGenomeClient(
+        [
+            {"tournament": {"id": "tour-1", "manifest_hash": manifest_hash, "status": "frozen"}},
+            {
+                "tournament": {
+                    "id": "tour-1",
+                    "manifest_hash": manifest_hash,
+                    "status": "revealed",
+                    "revealed_at": "2026-08-15T00:00:00Z",
+                    "reveal_hash": reveal_hash,
+                }
+            },
+        ]
+    )
+
+    response = client.mark_tournament_revealed(
+        "tour-1",
+        expected_manifest_hash=manifest_hash,
+        reveal=reveal,
+        expected_reveal_hash=reveal_hash,
+        confirmation=TOURNAMENT_REVEAL_PHRASE,
+    )
+
+    assert response["reveal_hash"] == reveal_hash
+    assert client.calls == [
+        ("GET", "/tournaments/tour-1", None),
+        (
+            "POST",
+            "/tournaments/tour-1/reveal",
+            {
+                "expected_manifest_hash": manifest_hash,
+                "reveal": reveal,
+                "expected_reveal_hash": reveal_hash,
+            },
+        ),
+    ]
+
+
+def test_reveal_rejects_stale_manifest_before_mutation():
+    client = FakeGenomeClient(
+        [{"tournament": {"id": "tour-1", "manifest_hash": "7" * 64, "status": "frozen"}}]
+    )
+
+    with pytest.raises(DiscoveryGenomeError, match="manifest hash mismatch"):
+        client.mark_tournament_revealed(
+            "tour-1",
+            expected_manifest_hash="8" * 64,
+            reveal={"external_commitment": "benchmark revealed"},
+            confirmation=TOURNAMENT_REVEAL_PHRASE,
+        )
+
+    assert client.calls == [("GET", "/tournaments/tour-1", None)]
+
+
 @pytest.mark.parametrize(
     "changed",
     [
@@ -294,6 +354,15 @@ def test_result_rejects_a_mismatched_persisted_entry():
             {
                 "tournament_id": "tour-1",
                 "expected_review_hash": "a" * 64,
+                "confirmation": "yes",
+            },
+        ),
+        (
+            "mark_tournament_revealed",
+            {
+                "tournament_id": "tour-1",
+                "expected_manifest_hash": "a" * 64,
+                "reveal": {"external_commitment": "revealed"},
                 "confirmation": "yes",
             },
         ),
