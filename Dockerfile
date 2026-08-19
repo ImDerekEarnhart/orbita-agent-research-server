@@ -20,7 +20,8 @@ COPY src/orbita_agent/resources/language_limit_kernel/ ./
 # Repository transport preserves a final LF; the frozen rc1 sources intentionally
 # did not contain one. Remove that byte, then verify the exact manifest identity.
 RUN for file in MANIFEST.json lake-manifest.json lakefile.toml lean-toolchain OrbitaLanguageLimit.lean \
-      OrbitaLanguageLimit/Basic.lean OrbitaLanguageLimit/Certificate.lean; do \
+      OrbitaLanguageLimit/Basic.lean OrbitaLanguageLimit/Certificate.lean OrbitaLanguageLimit/Example.lean \
+      OrbitaLanguageLimit/CoherentStateBridge.lean OrbitaLanguageLimit/OrbitaIssuedCertificate.lean; do \
       if [ "$(tail -c 1 "$file" | od -An -t u1 | tr -d ' ')" = "10" ]; then truncate -s -1 "$file"; fi; \
     done \
     && echo "f25e21067c53116b8d70e80cc375d2205b459f0c01af3c095c758b288f54379c  MANIFEST.json" | sha256sum -c - \
