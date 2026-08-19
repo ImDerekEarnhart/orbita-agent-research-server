@@ -124,6 +124,20 @@ def test_case_lifecycle_lean_accepts_and_mutations_fail_closed(tmp_path: Path, m
             "EXHAUSTIVELY_VERIFIED_FINITE_DOMAIN"
         )
 
+        accepted_receipt_hash = verified["verification_receipt"]["receipt_hash"]
+        changed_after_acceptance = copy.deepcopy(frozen["certificate"])
+        changed_after_acceptance["witness"]["left_outcome"] = 99
+        monotonic = gateway.verify_language_limit(
+            certificate_hash=frozen["certificate"]["certificate_hash"], certificate=changed_after_acceptance
+        )
+        assert monotonic["status"] == "LEAN_VERIFIED_FINITE"
+        assert monotonic["verification_receipt"]["receipt_hash"] == accepted_receipt_hash
+        assert [attempt["status"] for attempt in monotonic["verification_attempts"]] == [
+            "LEAN_VERIFIED_FINITE",
+            "LEAN_REJECTED",
+        ]
+        assert "differs from the frozen" in monotonic["verification_attempts"][-1]["verification_receipt"]["error"]
+
         other_case = gateway.create_case(name="Mutation", goal="Reject a changed certificate")
         other = gateway.discover_and_freeze_language_limit(
             case_id=other_case["id"], snapshot_spec=_spec(), cases=_cases()

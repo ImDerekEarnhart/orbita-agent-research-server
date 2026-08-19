@@ -9,6 +9,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from orbita import ActorRole, EvidenceKind, Stance
 from orbita.epistemic_contract import EvidenceStatus
@@ -47,6 +48,16 @@ CREATE TABLE IF NOT EXISTS language_limit_artifacts (
     verified_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_language_limit_case ON language_limit_artifacts(case_id, created_at);
+CREATE TABLE IF NOT EXISTS language_limit_verification_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    certificate_hash TEXT NOT NULL REFERENCES language_limit_artifacts(certificate_hash),
+    status TEXT NOT NULL,
+    lean_source_json TEXT,
+    receipt_json TEXT NOT NULL,
+    attempted_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_language_limit_attempts
+    ON language_limit_verification_attempts(certificate_hash, attempted_at);
 CREATE TABLE IF NOT EXISTS language_refinement_experiments (
     proposal_hash TEXT PRIMARY KEY,
     case_id TEXT NOT NULL REFERENCES research_cases(id),
@@ -94,7 +105,31 @@ class LanguageLimitVerificationService:
         self.research_service = research_service
         self.connection = research_service.store.ledger.db.conn
         self.connection.executescript(SCHEMA)
+        self._backfill_canonical_attempts()
         self.connection.commit()
+
+    def _backfill_canonical_attempts(self) -> None:
+        """Preserve receipts created before append-only attempt history existed."""
+        rows = self.connection.execute(
+            """SELECT certificate_hash, status, lean_source_json, receipt_json, created_at, verified_at
+               FROM language_limit_artifacts WHERE receipt_json IS NOT NULL"""
+        ).fetchall()
+        for row in rows:
+            receipt = json.loads(row["receipt_json"])
+            receipt_hash = receipt.get("receipt_hash") or content_hash(receipt)
+            self.connection.execute(
+                """INSERT OR IGNORE INTO language_limit_verification_attempts
+                   (attempt_id, certificate_hash, status, lean_source_json, receipt_json, attempted_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    f"legacy_{receipt_hash}",
+                    row["certificate_hash"],
+                    row["status"],
+                    row["lean_source_json"],
+                    row["receipt_json"],
+                    row["verified_at"] or row["created_at"],
+                ),
+            )
 
     def discover_and_freeze(
         self,
@@ -188,6 +223,12 @@ class LanguageLimitVerificationService:
 
     def get(self, certificate_hash: str) -> dict[str, Any]:
         row = self._row(certificate_hash)
+        attempt_rows = self.connection.execute(
+            """SELECT attempt_id, status, lean_source_json, receipt_json, attempted_at
+               FROM language_limit_verification_attempts
+               WHERE certificate_hash = ? ORDER BY attempted_at, attempt_id""",
+            (certificate_hash,),
+        ).fetchall()
         return {
             "schema": ARTIFACT_SCHEMA,
             "case_id": row["case_id"],
@@ -198,6 +239,16 @@ class LanguageLimitVerificationService:
             "certificate": json.loads(row["certificate_json"]),
             "lean_source": json.loads(row["lean_source_json"]) if row["lean_source_json"] else None,
             "verification_receipt": json.loads(row["receipt_json"]) if row["receipt_json"] else None,
+            "verification_attempts": [
+                {
+                    "attempt_id": attempt["attempt_id"],
+                    "status": attempt["status"],
+                    "lean_source": json.loads(attempt["lean_source_json"]) if attempt["lean_source_json"] else None,
+                    "verification_receipt": json.loads(attempt["receipt_json"]),
+                    "attempted_at": attempt["attempted_at"],
+                }
+                for attempt in attempt_rows
+            ],
             "created_at": row["created_at"],
             "verified_at": row["verified_at"],
         }
@@ -313,19 +364,38 @@ class LanguageLimitVerificationService:
             receipt = receipt_body | {"receipt_hash": content_hash(receipt_body)}
             status = "LEAN_REJECTED"
         now = _now()
+        attempt_uuid = uuid4().hex
+        attempt_id = f"attempt_{attempt_uuid}"
         artifact_dir = self.research_service.store.case_dir(row["case_id"]) / "language_limit" / certificate_hash
+        # Keep the physical path short enough for Windows verification workers;
+        # SQLite retains the full attempt/certificate relationship.
+        attempt_dir = self.research_service.store.case_dir(row["case_id"]) / "lla" / attempt_uuid
+        attempt_dir.mkdir(parents=True, exist_ok=False)
         if rendered is not None:
-            (artifact_dir / "GeneratedCertificate.lean").write_text(rendered["lean_source"], encoding="utf-8")
-        (artifact_dir / "verification_receipt.json").write_text(
+            (attempt_dir / "GeneratedCertificate.lean").write_text(rendered["lean_source"], encoding="utf-8")
+        (attempt_dir / "verification_receipt.json").write_text(
             json.dumps(receipt, sort_keys=True, indent=2) + "\n", encoding="utf-8"
         )
         self.connection.execute(
+            """INSERT INTO language_limit_verification_attempts
+               (attempt_id, certificate_hash, status, lean_source_json, receipt_json, attempted_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (attempt_id, certificate_hash, status, _stable(rendered) if rendered else None, _stable(receipt), now),
+        )
+        was_verified = row["status"] == "LEAN_VERIFIED_FINITE"
+        if not was_verified:
+            if rendered is not None:
+                (artifact_dir / "GeneratedCertificate.lean").write_text(rendered["lean_source"], encoding="utf-8")
+            (artifact_dir / "verification_receipt.json").write_text(
+                json.dumps(receipt, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+            )
+        self.connection.execute(
             """UPDATE language_limit_artifacts
                SET status = ?, lean_source_json = ?, receipt_json = ?, verified_at = ?
-               WHERE certificate_hash = ?""",
+               WHERE certificate_hash = ? AND status <> 'LEAN_VERIFIED_FINITE'""",
             (status, _stable(rendered) if rendered else None, _stable(receipt), now, certificate_hash),
         )
-        if status == "LEAN_VERIFIED_FINITE":
+        if status == "LEAN_VERIFIED_FINITE" and not was_verified:
             evidence_id = self.research_service.ledger.add_evidence(
                 f"orbita://language-limit/{certificate_hash}/receipt",
                 "Lean accepted the exact finite representational-hole certificate.",
