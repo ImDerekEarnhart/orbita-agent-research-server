@@ -62,6 +62,7 @@ RUN python -m pip install --no-cache-dir /wheels/* \
     && rm -rf /wheels \
     && mkdir -p /data \
     && chown orbita:orbita /data \
+    && chmod -R a+rX /opt/elan /opt/orbita-language-limit \
     && chmod 0555 /usr/local/bin/orbita-offline-lean
 
 COPY deploy/docker-entrypoint.sh /usr/local/bin/orbita-entrypoint
