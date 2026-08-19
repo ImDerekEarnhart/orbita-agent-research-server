@@ -19,9 +19,9 @@ WORKDIR /opt/orbita-language-limit
 COPY src/orbita_agent/resources/language_limit_kernel/ ./
 # Repository transport preserves a final LF; the frozen rc1 sources intentionally
 # did not contain one. Remove that byte, then verify the exact manifest identity.
-# Lake also compares Mathlib's recorded origin with the frozen manifest on every
-# invocation. Normalize it while Git is available in the builder so the
-# deliberately Git-free runtime never needs a package refresh.
+# Capture Lake's fully resolved import path while Git is available in the
+# builder. Production verification invokes Lean directly with this path and
+# never asks Lake to inspect or update dependency repositories.
 RUN for file in MANIFEST.json lake-manifest.json lakefile.toml lean-toolchain OrbitaLanguageLimit.lean \
       OrbitaLanguageLimit/Basic.lean OrbitaLanguageLimit/Certificate.lean OrbitaLanguageLimit/Example.lean \
       OrbitaLanguageLimit/CoherentStateBridge.lean OrbitaLanguageLimit/OrbitaIssuedCertificate.lean; do \
@@ -30,8 +30,7 @@ RUN for file in MANIFEST.json lake-manifest.json lakefile.toml lean-toolchain Or
     && echo "f25e21067c53116b8d70e80cc375d2205b459f0c01af3c095c758b288f54379c  MANIFEST.json" | sha256sum -c - \
     && lake exe cache get \
     && lake build \
-    && git -C .lake/packages/mathlib remote set-url origin https://github.com/leanprover-community/mathlib4 \
-    && test "$(git -C .lake/packages/mathlib remote get-url origin)" = "https://github.com/leanprover-community/mathlib4"
+    && lake env printenv LEAN_PATH > .orbita-lean-path
 
 FROM python:3.12-slim AS runtime
 
@@ -46,7 +45,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     ORBITA_AGENT_REQUIRE_AUTH=1 \
     ORBITA_AGENT_AUTH_MODE=oauth-github \
     ORBITA_LANGUAGE_LIMIT_KERNEL_ROOT=/opt/orbita-language-limit \
-    ORBITA_LEAN_EXECUTABLE=/opt/elan/bin/lake \
+    ORBITA_LEAN_EXECUTABLE=/usr/local/bin/orbita-offline-lean \
     ELAN_HOME=/opt/elan \
     PATH=/opt/elan/bin:${PATH}
 
@@ -58,10 +57,12 @@ RUN apt-get update \
 COPY --from=builder /wheels /wheels
 COPY --from=lean-builder /opt/elan /opt/elan
 COPY --from=lean-builder /opt/orbita-language-limit /opt/orbita-language-limit
+COPY deploy/orbita-offline-lean /usr/local/bin/orbita-offline-lean
 RUN python -m pip install --no-cache-dir /wheels/* \
     && rm -rf /wheels \
     && mkdir -p /data \
-    && chown orbita:orbita /data
+    && chown orbita:orbita /data \
+    && chmod 0555 /usr/local/bin/orbita-offline-lean
 
 COPY deploy/docker-entrypoint.sh /usr/local/bin/orbita-entrypoint
 RUN chmod 0755 /usr/local/bin/orbita-entrypoint
