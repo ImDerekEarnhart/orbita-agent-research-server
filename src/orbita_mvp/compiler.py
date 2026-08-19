@@ -6,6 +6,7 @@ from typing import Any
 
 import pandas as pd
 
+from .column_semantics import is_support_or_weight_column
 from .table_domain import generate_table_candidates
 
 
@@ -44,14 +45,28 @@ class ResearchCompiler:
             }
         selected = max(tables, key=lambda item: int(item.get("profile", {}).get("rows", 0)))
         df = pd.read_csv(Path(selected["extracted_path"]))
+        profile = selected.get("profile", {})
+        identifier_columns = [
+            c["name"] for c in profile.get("column_profiles", []) if c.get("inferred_role") == "identifier"
+        ]
+        support_columns = sorted(
+            {
+                c["name"]
+                for c in profile.get("column_profiles", [])
+                if c.get("inferred_role") == "support_or_weight"
+                or is_support_or_weight_column(str(c.get("name", "")))
+            }
+            | {str(column) for column in df.columns if is_support_or_weight_column(str(column))}
+        )
+        excluded_columns = sorted(set(identifier_columns) | set(support_columns))
         candidates, generation = generate_table_candidates(
             df,
             goal=case.get("goal", ""),
             max_candidates=max_candidates,
             scout_fraction=scout_fraction,
             seed=seed,
+            excluded_columns=excluded_columns,
         )
-        profile = selected.get("profile", {})
         assumptions = [
             {
                 "id": "unit_of_analysis",
@@ -72,10 +87,30 @@ class ResearchCompiler:
                 "requires_review": False,
             },
         ]
-        identifier_columns = [
-            c["name"] for c in profile.get("column_profiles", []) if c.get("inferred_role") == "identifier"
-        ]
         quality_findings = self._quality_findings(profile)
+        for column in support_columns:
+            if not any(
+                finding.get("title") == f"Support/count column excluded: {column}"
+                for finding in quality_findings
+            ):
+                quality_findings.append(
+                    {
+                        "type": "artifact_guard",
+                        "severity": "medium",
+                        "title": f"Support/count column excluded: {column}",
+                        "detail": (
+                            "This column describes sample support or weighting and is not treated as a "
+                            "scientific outcome by automatic relation mining. An explicit reviewed plan "
+                            "is required to use it as an outcome."
+                        ),
+                    }
+                )
+        blocking_questions = []
+        if not candidates:
+            blocking_questions.append(
+                "No defensible automatic candidates remained after identifier and support/count/weight "
+                "columns were excluded. Name an explicit scientific outcome or provide richer measurements."
+            )
         return {
             "schema_version": "orbita-research-plan/0.1",
             "mode": case.get("mode", "open_discovery"),
@@ -92,7 +127,7 @@ class ResearchCompiler:
             "source_context": [self._source_summary(item) for item in texts],
             "data_profile": profile,
             "quality_findings": quality_findings,
-            "excluded_from_candidate_generation": identifier_columns,
+            "excluded_from_candidate_generation": excluded_columns,
             "candidate_generation": generation,
             "routes": ["uploaded_table_association", "data_quality_audit", "belief_graph_import"],
             "thresholds": {
@@ -106,7 +141,7 @@ class ResearchCompiler:
             "improvement_policy": policy_receipt,
             "candidates": candidates,
             "assumptions": assumptions,
-            "blocking_questions": [],
+            "blocking_questions": blocking_questions,
             "report_modules": [
                 "source_inventory",
                 "data_interpretation",
@@ -212,6 +247,18 @@ class ResearchCompiler:
                         "severity": "low",
                         "title": f"Identifier excluded: {column['name']}",
                         "detail": "The column appears unique per row and is excluded from automatic relation mining.",
+                    }
+                )
+            if column.get("inferred_role") == "support_or_weight":
+                findings.append(
+                    {
+                        "type": "artifact_guard",
+                        "severity": "medium",
+                        "title": f"Support/count column excluded: {column['name']}",
+                        "detail": (
+                            "The column describes sample support or weighting and is excluded from "
+                            "automatic relation mining."
+                        ),
                     }
                 )
         return findings

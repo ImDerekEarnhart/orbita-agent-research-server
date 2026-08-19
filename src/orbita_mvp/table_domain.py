@@ -12,6 +12,8 @@ import pandas as pd
 
 from orbita_discovery.core import Candidate, CandidateNotScorable
 
+from .column_semantics import is_support_or_weight_column
+
 
 def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")[:48]
@@ -60,6 +62,7 @@ def generate_table_candidates(
     max_candidates: int = 60,
     scout_fraction: float = 0.6,
     seed: int = 20260623,
+    excluded_columns: Iterable[str] = (),
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if len(df) < 6:
         raise ValueError("At least 6 rows are required for discovery and held-out checking")
@@ -69,10 +72,17 @@ def generate_table_candidates(
     cut = max(3, min(len(indices) - 3, int(len(indices) * scout_fraction)))
     scout = df.iloc[indices[:cut]].copy()
 
+    requested_exclusions = {str(column) for column in excluded_columns}
+    semantic_exclusions = {
+        str(column) for column in df.columns if is_support_or_weight_column(str(column))
+    }
+    effective_exclusions = requested_exclusions | semantic_exclusions
     numeric_columns = []
     categorical_columns = []
     for column in df.columns:
         name = str(column)
+        if name in effective_exclusions:
+            continue
         numeric_fraction = float(pd.to_numeric(df[column], errors="coerce").notna().mean())
         unique = int(df[column].nunique(dropna=True))
         if numeric_fraction >= 0.85 and unique >= 3:
@@ -80,7 +90,8 @@ def generate_table_candidates(
         elif 2 <= unique <= min(12, max(3, int(len(df) * 0.2))):
             categorical_columns.append(name)
 
-    goal_columns = _goal_columns(goal, [str(c) for c in df.columns]) if goal.strip() else []
+    eligible_columns = [str(column) for column in df.columns if str(column) not in effective_exclusions]
+    goal_columns = _goal_columns(goal, eligible_columns) if goal.strip() else []
     scored: list[tuple[float, dict[str, Any]]] = []
 
     for i, x in enumerate(numeric_columns):
@@ -158,6 +169,9 @@ def generate_table_candidates(
         "confirmation_rows": len(df) - len(scout),
         "numeric_columns": numeric_columns,
         "categorical_columns": categorical_columns,
+        "excluded_columns": sorted(effective_exclusions),
+        "semantic_support_exclusions": sorted(semantic_exclusions),
+        "outcome_guard": "identifier and support/count/weight columns excluded from automatic candidates",
         "goal_columns": goal_columns,
         "generated_candidates": len(candidates),
         "candidate_budget": max_candidates,

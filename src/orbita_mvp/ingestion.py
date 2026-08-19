@@ -13,6 +13,7 @@ from typing import Any
 import pandas as pd
 
 from .chatgpt_export import looks_like_chatgpt_export, messages_to_frame, parse_conversations
+from .column_semantics import is_support_or_weight_column
 
 
 class IngestionError(RuntimeError):
@@ -78,6 +79,8 @@ def profile_dataframe(df: pd.DataFrame) -> dict[str, Any]:
             role = "time"
         if any(token in normalized for token in ("label", "class", "group", "condition", "diagnosis", "treatment")):
             role = "group_or_category"
+        if kind == "numeric" and is_support_or_weight_column(name):
+            role = "support_or_weight"
         profile["column_profiles"].append(
             {
                 "name": name,
