@@ -32,6 +32,7 @@ from .graph_adapter import analyze_graph, export_lean_certificate
 from .improvement import PROMOTION_PHRASE, ROLLBACK_PHRASE, ImprovementLab
 from .improvement_registry import ImprovementRegistry
 from .knowledge import KnowledgeStore
+from .language_limit_verification import LanguageLimitVerificationService
 from .memory_index import MemoryIndex, chat_export_members
 from .object_store import build_object_store, object_key
 from .reversals import find_candidate_reversals
@@ -77,6 +78,7 @@ class AgentGateway:
         self.general_problem_loops = GeneralProblemLoopService(self.config.general_problem_loop_db)
         self.candidate_executions = CandidateExecutionLedger(self.config.candidate_execution_db)
         self.evidence_receipts = EvidenceReceiptLedger(self.config.evidence_receipt_db)
+        self.language_limits = LanguageLimitVerificationService(self.config, self.service)
         self.memory = MemoryIndex(self.config.memory_db)
         self.objects = build_object_store(self.config.home / "objects")
         self._lock = threading.RLock()
@@ -138,6 +140,8 @@ class AgentGateway:
                 "frozen deterministic external experiments with independent verification",
                 "prospective blind calibration with prediction-before-reveal scoring",
                 "hash-bound language snapshots, finite representation audits, and inert semantic transitions",
+                "case-bound representational-hole discovery, deterministic Lean verification, and finite receipts",
+                "frozen missing-primitive proposals with one-shot prospective gap-reduction tests",
                 "typed capability-component graphs for archive synthesis",
                 "append-only General Problem Loops with hash-chained evidence and bounded retries",
                 "compile-time candidate-to-executor binding with append-only dispatch receipts",
@@ -171,7 +175,7 @@ class AgentGateway:
                 "Surviving a configured gauntlet is not universal proof, causality, or novelty.",
                 "Plan approval is a distinct hash-bound action.",
                 "Inline agent uploads are text-only; browser/REST intake supports richer files.",
-                "Lean export checks a concrete finite witness only.",
+                "Language-limit Lean verification checks a concrete finite witness only and never upgrades it universally.",
                 "Self-improvement changes allowlisted research-policy values only and never promotes itself.",
                 "General improvement candidates can be frozen and evaluated, but cannot activate themselves.",
                 "Language transitions create inert snapshots and receipts; they never patch or activate this runtime.",
@@ -1387,6 +1391,64 @@ class AgentGateway:
         with self._lock:
             self.service.store.get_case(case_id)
             return self.service.store.case_claims(case_id)
+
+    def discover_and_freeze_language_limit(
+        self,
+        *,
+        case_id: str,
+        snapshot_spec: dict[str, Any],
+        cases: list[dict[str, Any]],
+        provenance_hashes: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.language_limits.discover_and_freeze(
+                case_id=case_id,
+                snapshot_spec=snapshot_spec,
+                cases=cases,
+                provenance_hashes=provenance_hashes,
+            )
+
+    def verify_language_limit(
+        self,
+        *,
+        certificate_hash: str,
+        certificate: dict[str, Any] | None = None,
+        provenance_hashes: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.language_limits.verify(
+                certificate_hash=certificate_hash,
+                certificate=certificate,
+                provenance_hashes=provenance_hashes,
+            )
+
+    def get_language_limit(self, certificate_hash: str) -> dict[str, Any]:
+        with self._lock:
+            return self.language_limits.get(certificate_hash)
+
+    def list_case_language_limits(self, case_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            return self.language_limits.list_for_case(case_id)
+
+    def propose_language_refinement(
+        self, *, case_id: str, snapshot_spec: dict[str, Any], discovery_cases: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.language_limits.propose_refinement(
+                case_id=case_id, snapshot_spec=snapshot_spec, discovery_cases=discovery_cases
+            )
+
+    def evaluate_language_refinement(
+        self, *, proposal_hash: str, evaluation_cases: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.language_limits.evaluate_refinement(
+                proposal_hash=proposal_hash, evaluation_cases=evaluation_cases
+            )
+
+    def get_language_refinement(self, proposal_hash: str) -> dict[str, Any]:
+        with self._lock:
+            return self.language_limits.get_refinement(proposal_hash)
 
     def claim_history(self, claim_id: str) -> dict[str, Any]:
         with self._lock:

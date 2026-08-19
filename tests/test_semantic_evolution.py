@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from orbita_agent.semantic_evolution import (
@@ -12,6 +14,7 @@ from orbita_agent.semantic_evolution import (
     build_repair_candidate,
     content_hash,
     materialize_authorized_transition,
+    render_language_limit_lean_source,
 )
 
 
@@ -121,6 +124,35 @@ def test_certificate_requires_a_real_collision_and_exact_snapshot_binding():
         build_language_limit_certificate(
             changed, audit, proof_path="finite_enumeration", proof_artifact_hash="a" * 64, checker_receipt_hash="b" * 64
         )
+
+
+def test_lean_source_export_is_deterministic_hash_bound_and_not_self_certifying():
+    snapshot = _snapshot()
+    audit = _audit(snapshot)
+    first = render_language_limit_lean_source(snapshot, audit)
+    second = render_language_limit_lean_source(snapshot, audit)
+    assert first == second
+    assert first["compiled"] is False
+    assert first["scope"] == "concrete_finite_collision_witnesses_only"
+    assert first["witness_count"] == 1
+    assert first["snapshot_hash"] == snapshot["snapshot_hash"]
+    assert first["audit_hash"] == audit["audit_hash"]
+    assert first["proof_artifact_hash"] == hashlib.sha256(first["lean_source"].encode("utf-8")).hexdigest()
+    assert "def certificate0 : HoleCertificate" in first["lean_source"]
+    assert "theorem certificate0_sound" in first["lean_source"]
+
+
+def test_lean_source_export_fails_closed_on_tampering_and_non_collision():
+    snapshot = _snapshot()
+    audit = _audit(snapshot)
+    with pytest.raises(ValueError, match="audit hash"):
+        render_language_limit_lean_source(snapshot, dict(audit, scope="tampered"))
+    no_hole = audit_representation(
+        snapshot,
+        [{"world_id": "a", "language_view": {"x": 0}, "outcome": 0}, {"world_id": "b", "language_view": {"x": 1}, "outcome": 1}],
+    )
+    with pytest.raises(ValueError, match="collision witness"):
+        render_language_limit_lean_source(snapshot, no_hole)
 
 
 def test_transition_requires_survived_hash_bound_evaluation_and_exact_human_phrase():

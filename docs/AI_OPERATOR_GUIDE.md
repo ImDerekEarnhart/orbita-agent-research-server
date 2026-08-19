@@ -79,6 +79,7 @@ Prefer:
 - “refuted by the named falsifier”;
 - “bounded search was inconclusive after reaching its state/time limit”;
 - “the generated Lean source checks one concrete finite certificate.”
+- “Orbita rendered a hash-bound finite-collision source artifact; it remains unproved until an independent Lean checker issues a matching receipt.”
 
 Avoid:
 
@@ -96,6 +97,21 @@ Operate Orbita as a cautious research compiler. Inspect case context first. Use 
 Before restating a claim more broadly, call `orbita_guard_claim_scope` with the evidence scope and proposed claim
 scope. A rejected scope escalation is a policy boundary, not a wording suggestion. An execution hash shows what ran;
 only an admitted formal-proof receipt can warrant `FORMALLY_PROVED`.
+
+## Language-limit verification workflow
+
+Use `orbita_discover_and_freeze_language_limit` with an existing case, a frozen L0 specification, and finite worlds.
+Supply each world's `language_view` and numeric `outcome`, but do not supply a witness. Orbita discovers an exact
+same-representation/different-target pair, creates the originating claim, and freezes the full JSON envelope. Then call
+`orbita_lean_verify_language_limit` with its certificate hash. The checker regenerates Lean deterministically from the
+stored JSON and refuses any changed certificate, changed case-file provenance, kernel mismatch, or unavailable checker.
+Retrieve the receipt with `orbita_get_language_limit_verification`. `LEAN_VERIFIED_FINITE` means only the exact frozen
+finite worlds were verified; it is never a universal theorem.
+
+For the repair experiment, call `orbita_propose_language_refinement` with L0, O, and discovery worlds containing raw
+`state` fields. Do not name the missing primitive. Orbita freezes its selected field projection and prediction. Test it
+once on prospectively supplied worlds with `orbita_test_frozen_language_refinement`; a survivor requires the exact
+finite inequality `Delta_L1(O) < Delta_L0(O)` and still carries no universal scope.
 
 When a validated external coverage bug affects existing Guided claims, pass their exact IDs as `affected_claim_ids`.
 Orbita will challenge or reject those claims according to `claim_effect` and queue dependent claims for review. If the

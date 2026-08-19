@@ -821,6 +821,93 @@ def install_guided_service_routes(
             return failure(exc)
 
     @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/cases/{{case_id}}/language-limits/discover",
+        methods=["POST"],
+        include_in_schema=False,
+    )
+    async def guided_discover_language_limit(request: Request) -> JSONResponse:
+        try:
+            body = await _json(request)
+            result = bound(request).discover_and_freeze_language_limit(
+                case_id=request.path_params["case_id"],
+                snapshot_spec=body["snapshot_spec"],
+                cases=body["cases"],
+                provenance_hashes=body.get("provenance_hashes"),
+            )
+            return JSONResponse(result, status_code=201)
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/language-limits/{{certificate_hash}}", methods=["GET"], include_in_schema=False
+    )
+    async def guided_get_language_limit(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse(bound(request).get_language_limit(request.path_params["certificate_hash"]))
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/language-limits/{{certificate_hash}}/verify",
+        methods=["POST"],
+        include_in_schema=False,
+    )
+    async def guided_verify_language_limit(request: Request) -> JSONResponse:
+        try:
+            body = await _json(request)
+            return JSONResponse(
+                bound(request).verify_language_limit(
+                    certificate_hash=request.path_params["certificate_hash"],
+                    certificate=body.get("certificate"),
+                    provenance_hashes=body.get("provenance_hashes"),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/cases/{{case_id}}/language-refinements", methods=["POST"], include_in_schema=False
+    )
+    async def guided_propose_language_refinement(request: Request) -> JSONResponse:
+        try:
+            body = await _json(request)
+            return JSONResponse(
+                bound(request).propose_language_refinement(
+                    case_id=request.path_params["case_id"],
+                    snapshot_spec=body["snapshot_spec"],
+                    discovery_cases=body["discovery_cases"],
+                ),
+                status_code=201,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/language-refinements/{{proposal_hash}}", methods=["GET"], include_in_schema=False
+    )
+    async def guided_get_language_refinement(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse(bound(request).get_language_refinement(request.path_params["proposal_hash"]))
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
+        f"{GUIDED_API_PREFIX}/language-refinements/{{proposal_hash}}/evaluate",
+        methods=["POST"],
+        include_in_schema=False,
+    )
+    async def guided_evaluate_language_refinement(request: Request) -> JSONResponse:
+        try:
+            body = await _json(request)
+            return JSONResponse(
+                bound(request).evaluate_language_refinement(
+                    proposal_hash=request.path_params["proposal_hash"], evaluation_cases=body["evaluation_cases"]
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            return failure(exc)
+
+    @mcp.custom_route(
         f"{GUIDED_API_PREFIX}/claims/{{claim_id}}/{{view}}", methods=["GET"], include_in_schema=False
     )
     async def guided_claim_view(request: Request) -> JSONResponse:

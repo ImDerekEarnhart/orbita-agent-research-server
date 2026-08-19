@@ -34,6 +34,14 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
         "orbita_build_language_snapshot",
         "orbita_audit_representation",
         "orbita_build_language_limit_certificate",
+        "orbita_render_language_limit_lean_source",
+        "orbita_discover_and_freeze_language_limit",
+        "orbita_lean_verify_language_limit",
+        "orbita_get_language_limit_verification",
+        "orbita_list_case_language_limits",
+        "orbita_propose_language_refinement",
+        "orbita_test_frozen_language_refinement",
+        "orbita_get_language_refinement",
         "orbita_build_language_repair_candidate",
         "orbita_materialize_language_transition",
         "orbita_build_capability_component_graph",
@@ -126,6 +134,14 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
     assert tools["orbita_build_language_snapshot"].annotations.readOnlyHint is True
     assert tools["orbita_audit_representation"].annotations.readOnlyHint is True
     assert tools["orbita_build_language_limit_certificate"].annotations.readOnlyHint is True
+    assert tools["orbita_render_language_limit_lean_source"].annotations.readOnlyHint is True
+    assert tools["orbita_discover_and_freeze_language_limit"].annotations.destructiveHint is False
+    assert tools["orbita_lean_verify_language_limit"].annotations.destructiveHint is False
+    assert tools["orbita_get_language_limit_verification"].annotations.readOnlyHint is True
+    assert tools["orbita_list_case_language_limits"].annotations.readOnlyHint is True
+    assert tools["orbita_propose_language_refinement"].annotations.destructiveHint is False
+    assert tools["orbita_test_frozen_language_refinement"].annotations.destructiveHint is False
+    assert tools["orbita_get_language_refinement"].annotations.readOnlyHint is True
     assert tools["orbita_build_language_repair_candidate"].annotations.readOnlyHint is True
     assert tools["orbita_materialize_language_transition"].annotations.readOnlyHint is True
     assert tools["orbita_build_capability_component_graph"].annotations.readOnlyHint is True
@@ -190,7 +206,7 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
 
 def test_runtime_version_metadata_matches_package(gateway, monkeypatch):
     monkeypatch.setattr(gateway.knowledge, "status", lambda: {})
-    assert gateway.capabilities()["version"] == __version__ == "0.9.0"
+    assert gateway.capabilities()["version"] == __version__ == "0.10.0"
 
 
 def test_capabilities_executes_through_the_real_mcp_surface(gateway, monkeypatch):

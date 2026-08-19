@@ -48,6 +48,7 @@ from .semantic_evolution import (
     build_language_snapshot,
     build_repair_candidate,
     materialize_authorized_transition,
+    render_language_limit_lean_source,
 )
 from .tenancy import LegacySinglePrincipal, TenantResolutionError, build_registry
 from .uploads import UploadError, UploadTicketStore, max_upload_bytes
@@ -891,6 +892,91 @@ def build_mcp_server(
             proof_artifact_hash=proof_artifact_hash,
             checker_receipt_hash=checker_receipt_hash,
         )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_render_language_limit_lean_source(
+        snapshot: dict[str, Any], audit: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Render hash-bound Lean source for concrete finite collision witnesses.
+
+        This does not compile the source or issue a formal-proof receipt. A trusted
+        independent Lean checker must verify the returned proof_artifact_hash.
+        """
+        return render_language_limit_lean_source(snapshot, audit)
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_discover_and_freeze_language_limit(
+        case_id: str,
+        snapshot_spec: dict[str, Any],
+        cases: list[dict[str, Any]],
+        provenance_hashes: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Discover a finite representational hole and freeze its exact Lean proof obligation on a case.
+
+        Do not provide a witness: Orbita partitions the supplied worlds and selects
+        a same-representation/different-target pair itself. The resulting JSON is
+        immutable, hash-bound, finite in scope, and attached to a durable claim.
+        """
+        return _gateway_for_caller().discover_and_freeze_language_limit(
+            case_id=case_id,
+            snapshot_spec=snapshot_spec,
+            cases=cases,
+            provenance_hashes=provenance_hashes,
+        )
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_lean_verify_language_limit(
+        certificate_hash: str,
+        certificate: dict[str, Any] | None = None,
+        provenance_hashes: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Run the deterministic JSON-to-Lean checker and persist its bounded receipt.
+
+        Optional certificate/provenance inputs are equality guards only. They can
+        never replace or rewrite the frozen case artifact. Any mismatch rejects.
+        """
+        return _gateway_for_caller().verify_language_limit(
+            certificate_hash=certificate_hash,
+            certificate=certificate,
+            provenance_hashes=provenance_hashes,
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_get_language_limit_verification(certificate_hash: str) -> dict[str, Any]:
+        """Retrieve the frozen certificate, generated Lean hash, receipt, and bounded claim status."""
+        return _gateway_for_caller().get_language_limit(certificate_hash)
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_list_case_language_limits(case_id: str) -> dict[str, Any]:
+        """List language-limit certificates and verification receipts attached to one case."""
+        return {"artifacts": _gateway_for_caller().list_case_language_limits(case_id)}
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_propose_language_refinement(
+        case_id: str, snapshot_spec: dict[str, Any], discovery_cases: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Search raw states for a missing primitive P and freeze L1=L0+P before evaluation.
+
+        The caller supplies L0, O, and finite raw states, but does not name P.
+        Orbita scans exact raw-state projections and freezes its selected primitive.
+        """
+        return _gateway_for_caller().propose_language_refinement(
+            case_id=case_id, snapshot_spec=snapshot_spec, discovery_cases=discovery_cases
+        )
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_test_frozen_language_refinement(
+        proposal_hash: str, evaluation_cases: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Prospectively test whether the frozen L1 lowers the finite gap: Delta_L1(O) < Delta_L0(O)."""
+        return _gateway_for_caller().evaluate_language_refinement(
+            proposal_hash=proposal_hash, evaluation_cases=evaluation_cases
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_get_language_refinement(proposal_hash: str) -> dict[str, Any]:
+        """Retrieve one frozen primitive proposal and its one-shot prospective evaluation."""
+        return _gateway_for_caller().get_language_refinement(proposal_hash)
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_build_language_repair_candidate(

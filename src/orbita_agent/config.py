@@ -34,6 +34,8 @@ class AgentConfig:
     max_inline_bytes: int = 8_000_000
     max_graph_vertices: int = 128
     max_graph_edges: int = 1_024
+    lean_kernel_root: Path | None = None
+    lean_executable: str = "lake"
 
     @property
     def db_path(self) -> Path:
@@ -120,4 +122,10 @@ class AgentConfig:
             max_inline_bytes=int(os.getenv("ORBITA_AGENT_MAX_INLINE_BYTES", "8000000")),
             max_graph_vertices=int(os.getenv("ORBITA_AGENT_MAX_GRAPH_VERTICES", "128")),
             max_graph_edges=int(os.getenv("ORBITA_AGENT_MAX_GRAPH_EDGES", "1024")),
+            lean_kernel_root=(
+                Path(os.environ["ORBITA_LANGUAGE_LIMIT_KERNEL_ROOT"]).expanduser()
+                if os.getenv("ORBITA_LANGUAGE_LIMIT_KERNEL_ROOT")
+                else None
+            ),
+            lean_executable=os.getenv("ORBITA_LEAN_EXECUTABLE", "lake"),
         )

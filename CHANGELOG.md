@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.0 - 2026-08-19
+
+- Bound the verified Orbita Language Limit Lean kernel `0.2.0-rc1` into the case/provenance/claim lifecycle.
+- Added Orbita-discovered witness freezing over exact `X`, `phi`, `O`, rational arithmetic, finite scope, and provenance.
+- Added deterministic frozen-JSON-to-Lean translation plus trusted-checker receipts bound to the JSON, generated source,
+  theorem kernel, Lean/Mathlib versions, and build result.
+- Persisted `LEAN_VERIFIED_FINITE` and `LEAN_REJECTED` results on the originating case/claim without universal promotion.
+- Added MCP and Guided discover, freeze, verify, retrieve, and case-list surfaces.
+- Added frozen missing-primitive discovery and a one-shot prospective test of `Delta_L1(O) < Delta_L0(O)`.
+- Added fail-closed tests for certificate mutation, provenance mutation, altered audits, repeated prospective evaluation,
+  missing collision witnesses, LLM prose exclusion, and finite-to-universal scope escalation.
+
 ## 0.9.0 - 2026-08-14
 
 - Added append-only normalized evidence receipts with exact source, scope, result, evaluator, independence, provenance,
