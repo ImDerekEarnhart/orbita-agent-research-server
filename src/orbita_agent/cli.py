@@ -23,6 +23,8 @@ def _config(home: str | None) -> AgentConfig:
         max_inline_bytes=base.max_inline_bytes,
         max_graph_vertices=base.max_graph_vertices,
         max_graph_edges=base.max_graph_edges,
+        lean_kernel_root=base.lean_kernel_root,
+        lean_executable=base.lean_executable,
     )
 
 
