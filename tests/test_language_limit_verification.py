@@ -19,7 +19,12 @@ from orbita_agent.semantic_evolution import (
     render_frozen_language_limit_lean_source,
 )
 
-KERNEL = Path("C:/LeanBuilds/orbita_language_limit_lean_v0_1/orbita_language_limit_lean")
+KERNEL = Path(
+    os.getenv(
+        "ORBITA_LANGUAGE_LIMIT_TEST_KERNEL",
+        "C:/LeanBuilds/orbita_language_limit_lean_v0_1/orbita_language_limit_lean",
+    )
+)
 
 
 def _spec() -> dict:
