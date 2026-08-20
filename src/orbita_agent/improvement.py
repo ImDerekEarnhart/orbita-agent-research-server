@@ -462,6 +462,8 @@ class ImprovementLab:
                     "goal": plan["plan"].get("goal", ""),
                     "file_id": selected.get("file_id"),
                     "dataset_sha256": selected.get("sha256"),
+                    "excluded_columns": plan["plan"].get("excluded_from_candidate_generation", []),
+                    "group_column": plan["plan"].get("candidate_generation", {}).get("group_column"),
                 }
             )
         found = {item["case_id"] for item in records}
@@ -483,6 +485,8 @@ class ImprovementLab:
             max_candidates=policy["max_candidates"],
             scout_fraction=policy["scout_fraction"],
             seed=policy["seed"],
+            excluded_columns=benchmark.get("excluded_columns", []),
+            group_column=benchmark.get("group_column"),
         )
         if not candidates:
             return {
@@ -499,6 +503,7 @@ class ImprovementLab:
             candidates,
             scout_fraction=policy["scout_fraction"],
             seed=policy["seed"],
+            group_column=benchmark.get("group_column"),
         )
         engine = Engine(
             GatedJudge(commit_at=policy["commit_at"], baseline_margin=policy["baseline_margin"]),

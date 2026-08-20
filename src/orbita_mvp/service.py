@@ -129,6 +129,7 @@ class ResearchMVP:
                 plan["candidates"],
                 scout_fraction=float(plan.get("candidate_generation", {}).get("scout_fraction", 0.6)),
                 seed=int(plan.get("candidate_generation", {}).get("seed", 20260623)),
+                group_column=plan.get("candidate_generation", {}).get("group_column"),
             )
             judge = GatedJudge(
                 commit_at=float(thresholds.get("commit_at", 0.25)),

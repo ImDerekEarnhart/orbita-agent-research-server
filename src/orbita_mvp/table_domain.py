@@ -55,6 +55,56 @@ def _goal_columns(goal: str, columns: Iterable[str]) -> list[str]:
     return found
 
 
+def _partition_table(
+    df: pd.DataFrame,
+    *,
+    scout_fraction: float,
+    seed: int,
+    group_column: str | None,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    """Create a deterministic scout/confirmation split without cluster leakage."""
+
+    if group_column is None:
+        if len(df) < 6:
+            raise ValueError("At least 6 rows are required for discovery and held-out checking")
+        indices = list(range(len(df)))
+        random.Random(seed).shuffle(indices)
+        cut = max(3, min(len(indices) - 3, int(len(indices) * scout_fraction)))
+        return (
+            df.iloc[indices[:cut]].copy(),
+            df.iloc[indices[cut:]].copy(),
+            {"partition_unit": "row", "group_column": None},
+        )
+
+    if group_column not in df.columns:
+        raise ValueError(f"Configured cluster identifier {group_column!r} is absent from the table")
+    if df[group_column].isna().any():
+        raise ValueError(
+            f"Cluster identifier {group_column!r} contains missing values; group-safe splitting cannot be guaranteed"
+        )
+    keys = df[group_column].astype(str)
+    groups = sorted(keys.unique().tolist())
+    if len(groups) < 4:
+        raise ValueError(
+            f"Cluster identifier {group_column!r} has fewer than 4 groups; "
+            "at least 2 scout and 2 confirmation groups are required"
+        )
+    random.Random(seed).shuffle(groups)
+    cut = max(2, min(len(groups) - 2, int(len(groups) * scout_fraction)))
+    scout_groups = set(groups[:cut])
+    confirmation_groups = set(groups[cut:])
+    scout = df.loc[keys.isin(scout_groups)].copy()
+    confirmation = df.loc[keys.isin(confirmation_groups)].copy()
+    return scout, confirmation, {
+        "partition_unit": "group",
+        "group_column": group_column,
+        "total_group_count": len(groups),
+        "scout_group_count": len(scout_groups),
+        "confirmation_group_count": len(confirmation_groups),
+        "group_overlap_count": len(scout_groups & confirmation_groups),
+    }
+
+
 def generate_table_candidates(
     df: pd.DataFrame,
     *,
@@ -63,20 +113,21 @@ def generate_table_candidates(
     scout_fraction: float = 0.6,
     seed: int = 20260623,
     excluded_columns: Iterable[str] = (),
+    group_column: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    if len(df) < 6:
-        raise ValueError("At least 6 rows are required for discovery and held-out checking")
-    rng = random.Random(seed)
-    indices = list(range(len(df)))
-    rng.shuffle(indices)
-    cut = max(3, min(len(indices) - 3, int(len(indices) * scout_fraction)))
-    scout = df.iloc[indices[:cut]].copy()
+    scout, confirmation, partition = _partition_table(
+        df,
+        scout_fraction=scout_fraction,
+        seed=seed,
+        group_column=group_column,
+    )
 
     requested_exclusions = {str(column) for column in excluded_columns}
     semantic_exclusions = {
         str(column) for column in df.columns if is_support_or_weight_column(str(column))
     }
-    effective_exclusions = requested_exclusions | semantic_exclusions
+    cluster_exclusions = {group_column} if group_column is not None else set()
+    effective_exclusions = requested_exclusions | semantic_exclusions | cluster_exclusions
     numeric_columns = []
     categorical_columns = []
     for column in df.columns:
@@ -166,15 +217,19 @@ def generate_table_candidates(
         "seed": seed,
         "scout_fraction": scout_fraction,
         "scout_rows": len(scout),
-        "confirmation_rows": len(df) - len(scout),
+        "confirmation_rows": len(confirmation),
         "numeric_columns": numeric_columns,
         "categorical_columns": categorical_columns,
         "excluded_columns": sorted(effective_exclusions),
         "semantic_support_exclusions": sorted(semantic_exclusions),
-        "outcome_guard": "identifier and support/count/weight columns excluded from automatic candidates",
+        "cluster_identifier_exclusions": sorted(cluster_exclusions),
+        "outcome_guard": (
+            "identifier, cluster identifier, and support/count/weight columns excluded from automatic candidates"
+        ),
         "goal_columns": goal_columns,
         "generated_candidates": len(candidates),
         "candidate_budget": max_candidates,
+        **partition,
     }
     return candidates, generation
 
@@ -197,16 +252,19 @@ class UploadedTableDomain:
         *,
         scout_fraction: float = 0.6,
         seed: int = 20260623,
+        group_column: str | None = None,
     ):
         if not candidates:
             raise ValueError("The approved plan contains no testable candidates")
         self.df = dataframe.reset_index(drop=True)
         self.specs = candidates
-        indices = list(range(len(self.df)))
-        random.Random(seed).shuffle(indices)
-        cut = max(3, min(len(indices) - 3, int(len(indices) * scout_fraction)))
-        self.scout = self.df.iloc[indices[:cut]].copy()
-        self.confirmation = self.df.iloc[indices[cut:]].copy()
+        self.group_column = group_column
+        self.scout, self.confirmation, self.partition = _partition_table(
+            self.df,
+            scout_fraction=scout_fraction,
+            seed=seed,
+            group_column=group_column,
+        )
 
     def propose(self):
         for spec in self.specs:
@@ -226,6 +284,12 @@ class UploadedTableDomain:
         if seed in {0, 1} or len(confirmation) < 4:
             return train, confirmation
         rng = np.random.default_rng(seed)
+        if self.group_column is not None:
+            group_keys = confirmation[self.group_column].astype(str)
+            groups = sorted(group_keys.unique().tolist())
+            picks = rng.integers(0, len(groups), size=len(groups))
+            sampled = [confirmation.loc[group_keys == groups[index]].copy() for index in picks]
+            return train, pd.concat(sampled, ignore_index=True)
         picks = rng.integers(0, len(confirmation), size=len(confirmation))
         return train, confirmation.iloc[picks].copy()
 
