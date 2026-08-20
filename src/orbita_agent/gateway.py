@@ -15,6 +15,7 @@ from orbita_mvp import ResearchMVP
 from orbita_mvp.execution_dispatch import DEFAULT_EXECUTOR_REGISTRY
 
 from . import __version__
+from .arc3_control import run_synthetic_arc3_control, verify_receipt_chain
 from .archive_policy import ArchivePolicy
 from .blind_calibration import PREDICTION_KIND, BlindCalibrationService
 from .candidate_execution import CandidateExecutionLedger
@@ -147,6 +148,7 @@ class AgentGateway:
                 "append-only General Problem Loops with hash-chained evidence and bounded retries",
                 "compile-time candidate-to-executor binding with append-only dispatch receipts",
                 "normalized append-only evidence receipts with decision-specific eligibility",
+                "offline ARC-style prediction, counterexample, and prospective language-repair control",
             ],
             "approval_phrase": APPROVAL_PHRASE,
             "deletion_phrase": DELETION_PHRASE,
@@ -183,6 +185,7 @@ class AgentGateway:
                 "The General Problem Loop records executor receipts but cannot autonomously execute external actions.",
                 "Candidate kinds are never coerced into a different executor; missing grounding fails before approval.",
                 "Evidence receipts never grant semantic admission, activation, policy promotion, or deployment authority.",
+                "The ARC-style control is a synthetic acceptance test, not an official ARC-AGI-3 score.",
                 "Deterministic execution integrity is reported separately from scientific validity.",
             ],
         }
@@ -238,6 +241,16 @@ class AgentGateway:
     def verify_general_problem_loop(self, loop_id: str) -> dict[str, Any]:
         with self._lock:
             return self.general_problem_loops.verify_chain(loop_id)
+
+    def run_arc3_synthetic_control(self) -> dict[str, Any]:
+        """Run and persist the deterministic offline ARC-style acceptance artifact."""
+        with self._lock:
+            return run_synthetic_arc3_control(self.config.exports / "arc3_controls")
+
+    @staticmethod
+    def verify_arc3_control(artifact: dict[str, Any]) -> dict[str, Any]:
+        """Verify a supplied ARC control artifact without changing tenant state."""
+        return verify_receipt_chain(artifact)
 
     @staticmethod
     def _case_view(case: dict[str, Any]) -> dict[str, Any]:

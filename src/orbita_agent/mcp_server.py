@@ -1095,6 +1095,20 @@ def build_mcp_server(
         return _gateway_for_caller().verify_general_problem_loop(loop_id)
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_run_arc3_synthetic_control() -> dict[str, Any]:
+        """Run the offline ARC-style prediction/counterexample/language-repair acceptance control.
+
+        This creates a tenant-local hash-bound artifact. It does not call the ARC API,
+        access a scorecard, use model tokens, or claim an official ARC-AGI-3 score.
+        """
+        return _gateway_for_caller().run_arc3_synthetic_control()
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_verify_arc3_control(artifact: dict[str, Any]) -> dict[str, Any]:
+        """Recompute every receipt link and the top-level hash of an ARC control artifact."""
+        return _gateway_for_caller().verify_arc3_control(artifact)
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_compile_plan(case_id: str, max_candidates: int | None = None) -> dict[str, Any]:
         """Compile with the active policy; optionally override only the bounded candidate budget."""
         return _gateway_for_caller().compile_plan(case_id, max_candidates=max_candidates)
