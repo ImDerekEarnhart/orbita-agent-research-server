@@ -1,0 +1,36 @@
+{
+  "api_request_parameters": {
+    "max_output_tokens": 128000,
+    "reasoning": {
+      "effort": "max"
+    }
+  },
+  "benchmarking_runner_commit": "86d72170ce3155551712a9fafd290bab471d6eee",
+  "budgets": {
+    "environment_action_multiplier": 5.0,
+    "max_context_tokens": 175000,
+    "max_output_tokens": 128000
+  },
+  "environment_manifest": {
+    "binding_rule": "capture ordered environment IDs and their SHA-256 before either condition sees the first frame; use the identical bound manifest for both conditions",
+    "selection": "all available competition environments"
+  },
+  "model": {
+    "api": "responses",
+    "api_identifier": "gpt-5.6-sol",
+    "endpoint": "/v1/responses",
+    "provider": "openai",
+    "requested_family": "GPT-5.6 Sol"
+  },
+  "official_toolkit_commit": "f12822c4d550121c35a275008d964afbbed47d2f",
+  "operation_mode": "COMPETITION",
+  "repetitions": 3,
+  "seed_policy": {
+    "kind": "precommitted",
+    "seeds": [
+      1103,
+      2207,
+      3301
+    ]
+  }
+}
