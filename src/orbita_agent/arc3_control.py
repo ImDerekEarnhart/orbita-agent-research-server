@@ -36,7 +36,7 @@ def content_hash(value: Any) -> str:
     return hashlib.sha256(_stable(value).encode("utf-8")).hexdigest()
 
 
-def _append(chain: list[dict[str, Any]], kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+def append_receipt(chain: list[dict[str, Any]], kind: str, payload: dict[str, Any]) -> dict[str, Any]:
     body = {
         "sequence": len(chain),
         "kind": kind,
@@ -170,8 +170,8 @@ def run_synthetic_arc3_control(output_dir: str | Path | None = None) -> dict[str
     evaluation = None
     refined = False
 
-    _append(receipts, "control_started", {"snapshot_hash": snapshot["snapshot_hash"], "score_accessed": False})
-    _append(
+    append_receipt(receipts, "control_started", {"snapshot_hash": snapshot["snapshot_hash"], "score_accessed": False})
+    append_receipt(
         receipts,
         "hypothesis_frozen",
         {
@@ -183,7 +183,7 @@ def run_synthetic_arc3_control(output_dir: str | Path | None = None) -> dict[str
 
     while True:
         observation = world.observation()
-        observation_receipt = _append(
+        observation_receipt = append_receipt(
             receipts,
             "observation_recorded",
             {"observation": observation, "observation_hash": content_hash(observation)},
@@ -199,7 +199,7 @@ def run_synthetic_arc3_control(output_dir: str | Path | None = None) -> dict[str
             action = "RIGHT" if not refined or relation == "left_of" else "LEFT"
         predicted = _predict(action, relation, refined)
         action_id = f"level-{world.level + 1}-action-{actions_taken + 1}"
-        _append(
+        append_receipt(
             receipts,
             "prediction_frozen",
             {
@@ -214,7 +214,7 @@ def run_synthetic_arc3_control(output_dir: str | Path | None = None) -> dict[str
         result = world.step(action)
         actions_taken += 1
         transition = _case(action_id, observation, action, result["progress"])
-        _append(
+        append_receipt(
             receipts,
             "action_observed",
             {"action_id": action_id, "action": action, "result": result, "transition_hash": content_hash(transition)},
@@ -228,18 +228,18 @@ def run_synthetic_arc3_control(output_dir: str | Path | None = None) -> dict[str
                 "transition_hash": content_hash(transition),
             }
             failed_hypotheses.append(counterexample["hypothesis_id"])
-            _append(receipts, "counterexample_retained", counterexample)
+            append_receipt(receipts, "counterexample_retained", counterexample)
 
         if proposal is None:
             discovery_cases.append(transition)
             if len(discovery_cases) >= 2:
                 audit = audit_representation(snapshot, discovery_cases)
                 if audit["verdict"] == "LANGUAGE_LIMIT_WITNESS":
-                    _append(receipts, "representation_collision_frozen", audit)
+                    append_receipt(receipts, "representation_collision_frozen", audit)
                     proposal = propose_missing_primitive(snapshot, discovery_cases)
-                    _append(receipts, "language_refinement_frozen", proposal)
+                    append_receipt(receipts, "language_refinement_frozen", proposal)
                     refined = True
-                    _append(
+                    append_receipt(
                         receipts,
                         "hypothesis_frozen",
                         {
@@ -256,10 +256,10 @@ def run_synthetic_arc3_control(output_dir: str | Path | None = None) -> dict[str
             evaluation_cases.append(transition)
             if len(evaluation_cases) >= 2 and evaluation is None:
                 evaluation = evaluate_missing_primitive(snapshot, proposal, evaluation_cases)
-                _append(receipts, "prospective_refinement_evaluated", evaluation)
+                append_receipt(receipts, "prospective_refinement_evaluated", evaluation)
 
         if result["completed"]:
-            _append(receipts, "level_completed", {"level": world.level + 1, "actions_taken": actions_taken})
+            append_receipt(receipts, "level_completed", {"level": world.level + 1, "actions_taken": actions_taken})
             if not world.next_level():
                 break
 
@@ -281,7 +281,7 @@ def run_synthetic_arc3_control(output_dir: str | Path | None = None) -> dict[str
         "llm_prose_used_as_proof": False,
         "scope": "offline_synthetic_three_level_control_only",
     }
-    _append(receipts, "control_completed", summary)
+    append_receipt(receipts, "control_completed", summary)
     body = {
         "schema": SCHEMA,
         "receipt_schema": RECEIPT_SCHEMA,

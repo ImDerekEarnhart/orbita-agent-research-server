@@ -16,6 +16,7 @@ from orbita_mvp.execution_dispatch import DEFAULT_EXECUTOR_REGISTRY
 
 from . import __version__
 from .arc3_control import run_synthetic_arc3_control, verify_receipt_chain
+from .arc3_official import freeze_comparison_protocol, verify_comparison_protocol
 from .archive_policy import ArchivePolicy
 from .blind_calibration import PREDICTION_KIND, BlindCalibrationService
 from .candidate_execution import CandidateExecutionLedger
@@ -149,6 +150,7 @@ class AgentGateway:
                 "compile-time candidate-to-executor binding with append-only dispatch receipts",
                 "normalized append-only evidence receipts with decision-specific eligibility",
                 "offline ARC-style prediction, counterexample, and prospective language-repair control",
+                "official ARC toolkit action mediation and hash-frozen equal-budget model comparison protocols",
             ],
             "approval_phrase": APPROVAL_PHRASE,
             "deletion_phrase": DELETION_PHRASE,
@@ -186,6 +188,7 @@ class AgentGateway:
                 "Candidate kinds are never coerced into a different executor; missing grounding fails before approval.",
                 "Evidence receipts never grant semantic admission, activation, policy promotion, or deployment authority.",
                 "The ARC-style control is a synthetic acceptance test, not an official ARC-AGI-3 score.",
+                "ARC comparison freezing never calls a model, opens task content, creates a scorecard, or claims a result.",
                 "Deterministic execution integrity is reported separately from scientific validity.",
             ],
         }
@@ -251,6 +254,16 @@ class AgentGateway:
     def verify_arc3_control(artifact: dict[str, Any]) -> dict[str, Any]:
         """Verify a supplied ARC control artifact without changing tenant state."""
         return verify_receipt_chain(artifact)
+
+    def freeze_arc3_comparison_protocol(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Freeze the equal-budget GPT-5.6 baseline/hybrid comparison contract."""
+        with self._lock:
+            return freeze_comparison_protocol(spec, self.config.exports / "arc3_protocols")
+
+    @staticmethod
+    def verify_arc3_comparison_protocol(protocol: dict[str, Any]) -> dict[str, Any]:
+        """Verify a comparison contract without executing either condition."""
+        return verify_comparison_protocol(protocol)
 
     @staticmethod
     def _case_view(case: dict[str, Any]) -> dict[str, Any]:
