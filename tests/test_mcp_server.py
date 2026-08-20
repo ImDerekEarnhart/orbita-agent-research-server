@@ -85,6 +85,8 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
         "orbita_promote_improvement",
         "orbita_rollback_improvement",
         "orbita_governed_improvement_status",
+        "orbita_record_improvement_opportunity_diagnosis",
+        "orbita_audit_observation_only_instrument",
         "orbita_register_improvement_candidate",
         "orbita_list_governed_improvements",
         "orbita_get_governed_improvement",
@@ -169,6 +171,8 @@ def test_mcp_surface_has_governed_tool_annotations(gateway):
     assert tools["orbita_promote_improvement"].annotations.destructiveHint is True
     assert tools["orbita_rollback_improvement"].annotations.destructiveHint is True
     assert tools["orbita_governed_improvement_status"].annotations.readOnlyHint is True
+    assert tools["orbita_record_improvement_opportunity_diagnosis"].annotations.destructiveHint is False
+    assert tools["orbita_audit_observation_only_instrument"].annotations.readOnlyHint is True
     assert tools["orbita_guard_claim_scope"].annotations.readOnlyHint is True
     assert tools["orbita_register_improvement_candidate"].annotations.destructiveHint is False
     assert tools["orbita_record_governed_improvement_evaluation"].annotations.destructiveHint is False
@@ -301,6 +305,61 @@ def test_general_problem_loop_executes_through_real_mcp_surface(gateway):
     assert loop["activation_enabled"] is False
     _content, verified = asyncio.run(mcp.call_tool("orbita_verify_general_problem_loop", {"loop_id": loop["id"]}))
     assert verified["valid"] is True
+
+
+def test_opportunity_diagnosis_executes_through_governed_mcp_surface(gateway):
+    candidate = gateway.register_improvement_candidate(
+        candidate_kind="code_patch",
+        limitation_kind="ENGINE_CAPABILITY_LIMIT",
+        base_artifact={"component": "predictor", "version": "0"},
+        candidate_artifact={"component": "predictor", "version": "1"},
+        problem_statement="The exact-state predictor has insufficient coverage on unseen states.",
+        rationale="A transferable rule family may increase prospective prediction coverage.",
+        expected_benefit="More unseen states receive falsifiable successor predictions.",
+        created_by="mcp-test",
+    )
+    mcp, _ = build_mcp_server(gateway=gateway)
+    _content, diagnosis = asyncio.run(
+        mcp.call_tool(
+            "orbita_record_improvement_opportunity_diagnosis",
+            {
+                "candidate_id": candidate["id"],
+                "expected_candidate_hash": candidate["candidate_hash"],
+                "metrics": {
+                    "prediction_stage_applicable": True,
+                    "prediction_count": 0,
+                    "candidate_count": 0,
+                    "evaluable_count": 0,
+                    "refuted_count": 0,
+                    "improving_count": 0,
+                },
+                "diagnosed_by": "mcp-test",
+            },
+        )
+    )
+
+    assert diagnosis["diagnosis"]["classification"] == "NO_PREDICTIONS"
+    assert diagnosis["diagnosis"]["activation_authority"] is False
+    assert gateway.get_governed_improvement(candidate["id"])["opportunity_diagnoses"]
+
+
+def test_observation_only_audit_executes_through_mcp_surface(gateway):
+    mcp, _ = build_mcp_server(gateway=gateway)
+    behavior = [{"action": "left", "reward": 0}]
+    _content, audit = asyncio.run(
+        mcp.call_tool(
+            "orbita_audit_observation_only_instrument",
+            {
+                "instrument": {"name": "gap-classifier", "version": "1"},
+                "baseline_behavior": behavior,
+                "instrumented_behavior": behavior,
+                "context": {"prospective": True},
+            },
+        )
+    )
+
+    assert audit["verdict"] == "NO_BEHAVIOR_CHANGE_OBSERVED"
+    assert audit["activation_authority"] is False
 
 
 def test_adjudication_tool_executes_through_the_real_mcp_surface(gateway):

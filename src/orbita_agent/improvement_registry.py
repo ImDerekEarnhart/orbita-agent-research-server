@@ -16,6 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .opportunity_diagnosis import diagnose_improvement_opportunity
+
 CANDIDATE_KINDS = frozenset(
     {
         "policy_patch",
@@ -101,6 +103,18 @@ CREATE TABLE IF NOT EXISTS improvement_registry_evaluations (
     FOREIGN KEY(plan_id) REFERENCES improvement_registry_plans(id)
 );
 
+CREATE TABLE IF NOT EXISTS improvement_registry_opportunity_diagnoses (
+    id TEXT PRIMARY KEY,
+    candidate_id TEXT NOT NULL,
+    candidate_hash TEXT NOT NULL,
+    diagnosis_json TEXT NOT NULL,
+    diagnosis_hash TEXT NOT NULL,
+    record_hash TEXT NOT NULL UNIQUE,
+    diagnosed_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(candidate_id) REFERENCES improvement_registry_candidates(id)
+);
+
 CREATE TABLE IF NOT EXISTS improvement_registry_events (
     id TEXT PRIMARY KEY,
     candidate_id TEXT NOT NULL,
@@ -123,6 +137,10 @@ CREATE TRIGGER IF NOT EXISTS improvement_registry_evaluations_no_update
 BEFORE UPDATE ON improvement_registry_evaluations BEGIN SELECT RAISE(ABORT, 'improvement evaluations are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS improvement_registry_evaluations_no_delete
 BEFORE DELETE ON improvement_registry_evaluations BEGIN SELECT RAISE(ABORT, 'improvement evaluations are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS improvement_registry_opportunity_diagnoses_no_update
+BEFORE UPDATE ON improvement_registry_opportunity_diagnoses BEGIN SELECT RAISE(ABORT, 'opportunity diagnoses are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS improvement_registry_opportunity_diagnoses_no_delete
+BEFORE DELETE ON improvement_registry_opportunity_diagnoses BEGIN SELECT RAISE(ABORT, 'opportunity diagnoses are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS improvement_registry_events_no_update
 BEFORE UPDATE ON improvement_registry_events BEGIN SELECT RAISE(ABORT, 'improvement events are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS improvement_registry_events_no_delete
@@ -255,9 +273,13 @@ class ImprovementRegistry:
             "candidate_kinds": sorted(CANDIDATE_KINDS),
             "limitation_kinds": sorted(LIMITATION_KINDS),
             "event_counts": counts,
+            "opportunity_diagnosis_count": self.conn.execute(
+                "SELECT COUNT(*) FROM improvement_registry_opportunity_diagnoses"
+            ).fetchone()[0],
             "activation_enabled": False,
             "guarantees": [
                 "Candidate, plan, evaluation, and event rows are append-only.",
+                "Opportunity diagnoses are hash-bound to one exact inactive candidate and append-only.",
                 "Evaluation plans are frozen before results can be recorded.",
                 "Expected candidate and plan hashes are required when recording results.",
                 "No generalized candidate can promote, merge, deploy, or change active policy here.",
@@ -355,6 +377,69 @@ class ImprovementRegistry:
                 "SELECT * FROM improvement_registry_candidates ORDER BY created_at DESC LIMIT ?", (limit,)
             ).fetchall()
             return [self._candidate_row(row) for row in rows]
+
+    def record_opportunity_diagnosis(
+        self,
+        candidate_id: str,
+        *,
+        expected_candidate_hash: str,
+        metrics: dict[str, Any],
+        diagnosed_by: str,
+    ) -> dict[str, Any]:
+        """Append one observational diagnosis without evaluating or activating a candidate."""
+
+        candidate = self.get_candidate(candidate_id)
+        if expected_candidate_hash != candidate["candidate_hash"]:
+            raise ValueError("Candidate hash mismatch; fetch and review the candidate again")
+        diagnosis = diagnose_improvement_opportunity(metrics)
+        actor = _text("diagnosed_by", diagnosed_by, maximum=160)
+        body = {
+            "schema_version": "orbita-candidate-opportunity-diagnosis-record/1",
+            "candidate_id": candidate_id,
+            "candidate_hash": candidate["candidate_hash"],
+            "diagnosis": diagnosis,
+            "diagnosed_by": actor,
+        }
+        record_hash = content_hash(body)
+        record_id = _id("opportunity_diagnosis")
+        with self._lock:
+            try:
+                self.conn.execute(
+                    """INSERT INTO improvement_registry_opportunity_diagnoses
+                       (id, candidate_id, candidate_hash, diagnosis_json, diagnosis_hash,
+                        record_hash, diagnosed_by, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        record_id,
+                        candidate_id,
+                        candidate["candidate_hash"],
+                        _stable(diagnosis),
+                        diagnosis["diagnosis_hash"],
+                        record_hash,
+                        actor,
+                        _now(),
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                if "record_hash" in str(exc):
+                    raise ValueError("This exact opportunity diagnosis is already recorded") from exc
+                raise
+            self._event(
+                candidate_id,
+                "opportunity_diagnosed",
+                actor,
+                {
+                    "record_id": record_id,
+                    "record_hash": record_hash,
+                    "classification": diagnosis["classification"],
+                },
+            )
+            self.conn.commit()
+        return self._opportunity_diagnosis_row(
+            self.conn.execute(
+                "SELECT * FROM improvement_registry_opportunity_diagnoses WHERE id = ?", (record_id,)
+            ).fetchone()
+        )
 
     def get_candidate(self, candidate_id: str) -> dict[str, Any]:
         with self._lock:
@@ -493,9 +578,17 @@ class ImprovementRegistry:
         event_rows = self.conn.execute(
             "SELECT * FROM improvement_registry_events WHERE candidate_id = ? ORDER BY created_at, id", (item["id"],)
         ).fetchall()
+        diagnosis_rows = self.conn.execute(
+            """SELECT * FROM improvement_registry_opportunity_diagnoses
+               WHERE candidate_id = ? ORDER BY created_at, id""",
+            (item["id"],),
+        ).fetchall()
         item["evaluation_plan"] = self._plan_row(plan_row) if plan_row else None
         item["evaluation"] = self._evaluation_row(evaluation_row) if evaluation_row else None
         item["events"] = [self._event_row(event) for event in event_rows]
+        item["opportunity_diagnoses"] = [
+            self._opportunity_diagnosis_row(diagnosis) for diagnosis in diagnosis_rows
+        ]
         item["state"] = item["events"][-1]["event_type"] if item["events"] else "candidate_draft"
         item["activation_enabled"] = False
         return item
@@ -516,6 +609,12 @@ class ImprovementRegistry:
     def _event_row(row: sqlite3.Row) -> dict[str, Any]:
         item = dict(row)
         item["detail"] = json.loads(item.pop("detail_json"))
+        return item
+
+    @staticmethod
+    def _opportunity_diagnosis_row(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        item["diagnosis"] = json.loads(item.pop("diagnosis_json"))
         return item
 
     def _event(self, candidate_id: str, event_type: str, actor: str, detail: dict[str, Any]) -> None:

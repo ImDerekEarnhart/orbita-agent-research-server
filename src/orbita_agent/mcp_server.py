@@ -1188,6 +1188,38 @@ def build_mcp_server(
         return _gateway_for_caller().governed_improvement_status()
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
+    def orbita_record_improvement_opportunity_diagnosis(
+        candidate_id: str,
+        expected_candidate_hash: str,
+        metrics: dict[str, Any],
+        diagnosed_by: str,
+    ) -> dict[str, Any]:
+        """Record which stage first lacked a fair opportunity; never evaluates or activates the candidate."""
+
+        return _gateway_for_caller().record_improvement_opportunity_diagnosis(
+            candidate_id,
+            expected_candidate_hash=expected_candidate_hash,
+            metrics=metrics,
+            diagnosed_by=diagnosed_by,
+        )
+
+    @mcp.tool(annotations=READ_ONLY, structured_output=True)
+    def orbita_audit_observation_only_instrument(
+        instrument: dict[str, Any],
+        baseline_behavior: list[Any],
+        instrumented_behavior: list[Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Test observational neutrality on exact supplied traces; a pass is never universal proof."""
+
+        return _gateway_for_caller().audit_observation_only_instrument(
+            instrument=instrument,
+            baseline_behavior=baseline_behavior,
+            instrumented_behavior=instrumented_behavior,
+            context=context,
+        )
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
     def orbita_register_improvement_candidate(
         candidate_kind: str,
         limitation_kind: str,
