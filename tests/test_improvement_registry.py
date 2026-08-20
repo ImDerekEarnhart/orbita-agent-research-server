@@ -118,6 +118,56 @@ def test_general_candidate_cannot_self_promote_or_change_active_policy(gateway):
     assert gateway.get_governed_improvement(candidate["id"])["activation_enabled"] is False
 
 
+def test_opportunity_diagnosis_is_hash_bound_append_only_and_nonactivating(tmp_path):
+    registry = ImprovementRegistry(tmp_path / "registry.db")
+    try:
+        candidate = _candidate(registry)
+        metrics = {
+            "prediction_stage_applicable": False,
+            "prediction_count": 0,
+            "candidate_count": 3,
+            "evaluable_count": 3,
+            "refuted_count": 3,
+            "improving_count": 0,
+            "context": {"benchmark": "frozen-control-v1"},
+        }
+        with pytest.raises(ValueError, match="Candidate hash mismatch"):
+            registry.record_opportunity_diagnosis(
+                candidate["id"],
+                expected_candidate_hash="0" * 64,
+                metrics=metrics,
+                diagnosed_by="independent-diagnostic",
+            )
+
+        record = registry.record_opportunity_diagnosis(
+            candidate["id"],
+            expected_candidate_hash=candidate["candidate_hash"],
+            metrics=metrics,
+            diagnosed_by="independent-diagnostic",
+        )
+
+        assert record["diagnosis"]["classification"] == "ALL_REFUTED"
+        assert record["candidate_hash"] == candidate["candidate_hash"]
+        assert record["record_hash"]
+        refreshed = registry.get_candidate(candidate["id"])
+        assert refreshed["opportunity_diagnoses"][0]["record_hash"] == record["record_hash"]
+        assert refreshed["activation_enabled"] is False
+        with pytest.raises(ValueError, match="already recorded"):
+            registry.record_opportunity_diagnosis(
+                candidate["id"],
+                expected_candidate_hash=candidate["candidate_hash"],
+                metrics=metrics,
+                diagnosed_by="independent-diagnostic",
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            registry.conn.execute(
+                "UPDATE improvement_registry_opportunity_diagnoses SET diagnosis_json = '{}' WHERE id = ?",
+                (record["id"],),
+            )
+    finally:
+        registry.close()
+
+
 def test_language_limit_fails_closed_without_formal_certificate(tmp_path):
     registry = ImprovementRegistry(tmp_path / "registry.db")
     try:

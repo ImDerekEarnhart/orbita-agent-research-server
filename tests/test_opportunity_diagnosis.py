@@ -49,8 +49,24 @@ def test_gap_classification_preserves_instrument_identity():
 def test_gap_classification_rejects_inconsistent_counts():
     with pytest.raises(ValueError, match="evaluable_count"):
         diagnose_improvement_opportunity(_metrics(candidate_count=1, evaluable_count=2))
-    with pytest.raises(ValueError, match="refuted_count \+ improving_count"):
-        diagnose_improvement_opportunity(_metrics(evaluable_count=2, refuted_count=2, improving_count=1))
+    with pytest.raises(ValueError, match="non-refuted"):
+        diagnose_improvement_opportunity(
+            _metrics(candidate_count=2, evaluable_count=2, refuted_count=2, improving_count=1)
+        )
+
+
+def test_nonpredictive_workflow_is_not_mislabeled_no_predictions():
+    result = diagnose_improvement_opportunity(
+        _metrics(prediction_count=0, prediction_stage_applicable=False)
+    )
+
+    assert result["classification"] == "OK"
+    assert result["opportunity"]["prediction_stage_reached"] is None
+
+
+def test_nonapplicable_prediction_stage_rejects_a_prediction_count():
+    with pytest.raises(ValueError, match="must be zero"):
+        diagnose_improvement_opportunity(_metrics(prediction_stage_applicable=False))
 
 
 def test_observation_only_audit_passes_only_for_exact_behavioral_match():

@@ -35,6 +35,7 @@ from .knowledge import KnowledgeStore
 from .language_limit_verification import LanguageLimitVerificationService
 from .memory_index import MemoryIndex, chat_export_members
 from .object_store import build_object_store, object_key
+from .opportunity_diagnosis import audit_observation_only_instrument
 from .reversals import find_candidate_reversals
 
 APPROVAL_PHRASE = "I reviewed this exact frozen plan"
@@ -716,6 +717,41 @@ class AgentGateway:
     def governed_improvement_status(self) -> dict[str, Any]:
         with self._lock:
             return self.improvement_registry.status()
+
+    def record_improvement_opportunity_diagnosis(
+        self,
+        candidate_id: str,
+        *,
+        expected_candidate_hash: str,
+        metrics: dict[str, Any],
+        diagnosed_by: str,
+    ) -> dict[str, Any]:
+        """Bind one typed opportunity diagnosis to an exact inactive candidate."""
+
+        with self._lock:
+            return self.improvement_registry.record_opportunity_diagnosis(
+                candidate_id,
+                expected_candidate_hash=expected_candidate_hash,
+                metrics=metrics,
+                diagnosed_by=diagnosed_by,
+            )
+
+    def audit_observation_only_instrument(
+        self,
+        *,
+        instrument: dict[str, Any],
+        baseline_behavior: list[Any],
+        instrumented_behavior: list[Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return a deterministic, non-persistent audit receipt for supplied traces."""
+
+        return audit_observation_only_instrument(
+            instrument=instrument,
+            baseline_behavior=baseline_behavior,
+            instrumented_behavior=instrumented_behavior,
+            context=context,
+        )
 
     def register_improvement_candidate(
         self,

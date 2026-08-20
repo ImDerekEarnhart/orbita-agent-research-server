@@ -26,7 +26,7 @@ GAP_CLASSES = frozenset(
 )
 
 LIKELY_REPAIR = {
-    "NO_PREDICTIONS": "generalising_prediction_or_representation",
+    "NO_PREDICTIONS": "audit_prediction_coverage_then_test_representation_if_warranted",
     "NO_CANDIDATES": "proposer_search_or_llm_proposer",
     "ALL_UNEVALUABLE": "executor_verifier_or_language_extension",
     "ALL_REFUTED": "revise_hypothesis_family",
@@ -73,6 +73,7 @@ def diagnose_improvement_opportunity(metrics: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("metrics must be a JSON object")
     allowed = {
         "prediction_count",
+        "prediction_stage_applicable",
         "candidate_count",
         "evaluable_count",
         "refuted_count",
@@ -85,6 +86,11 @@ def diagnose_improvement_opportunity(metrics: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("unknown opportunity metric fields: " + ", ".join(unknown))
 
     prediction_count = _count("prediction_count", metrics.get("prediction_count"))
+    prediction_stage_applicable = metrics.get("prediction_stage_applicable", True)
+    if not isinstance(prediction_stage_applicable, bool):
+        raise ValueError("prediction_stage_applicable must be a boolean")
+    if not prediction_stage_applicable and prediction_count:
+        raise ValueError("prediction_count must be zero when prediction_stage_applicable is false")
     candidate_count = _count("candidate_count", metrics.get("candidate_count"))
     evaluable_count = _count("evaluable_count", metrics.get("evaluable_count"))
     refuted_count = _count("refuted_count", metrics.get("refuted_count"))
@@ -96,8 +102,9 @@ def diagnose_improvement_opportunity(metrics: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("refuted_count cannot exceed evaluable_count")
     if improving_count > evaluable_count:
         raise ValueError("improving_count cannot exceed evaluable_count")
-    if refuted_count + improving_count > evaluable_count:
-        raise ValueError("refuted_count + improving_count cannot exceed evaluable_count")
+    surviving_count = evaluable_count - refuted_count
+    if improving_count > surviving_count:
+        raise ValueError("improving_count cannot exceed the non-refuted evaluable candidates")
 
     instrument = _instrument(metrics.get("instrument"))
     context = metrics.get("context", {})
@@ -105,7 +112,7 @@ def diagnose_improvement_opportunity(metrics: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("context must be a JSON object")
     _stable(context)
 
-    if prediction_count == 0:
+    if prediction_stage_applicable and prediction_count == 0:
         classification = "NO_PREDICTIONS"
     elif candidate_count == 0:
         classification = "NO_CANDIDATES"
@@ -124,13 +131,17 @@ def diagnose_improvement_opportunity(metrics: dict[str, Any]) -> dict[str, Any]:
         "likely_repair": LIKELY_REPAIR[classification],
         "metrics": {
             "prediction_count": prediction_count,
+            "prediction_stage_applicable": prediction_stage_applicable,
             "candidate_count": candidate_count,
             "evaluable_count": evaluable_count,
             "refuted_count": refuted_count,
+            "surviving_count": surviving_count,
+            "unevaluable_count": candidate_count - evaluable_count,
             "improving_count": improving_count,
         },
         "opportunity": {
-            "prediction_stage_reached": prediction_count > 0,
+            "prediction_stage_applicable": prediction_stage_applicable,
+            "prediction_stage_reached": prediction_count > 0 if prediction_stage_applicable else None,
             "proposal_stage_reached": candidate_count > 0,
             "evaluation_stage_reached": evaluable_count > 0,
             "improvement_observed": improving_count > 0,
@@ -139,6 +150,9 @@ def diagnose_improvement_opportunity(metrics: dict[str, Any]) -> dict[str, Any]:
         "instrument_hash": content_hash(instrument) if instrument is not None else None,
         "context": context,
         "scope": "supplied_attempt_metrics_only",
+        "claim_boundary": (
+            "NO_PREDICTIONS is not evidence of a representation limit without an independent collision audit"
+        ),
         "activation_authority": False,
     }
     return body | {"diagnosis_hash": content_hash(body)}
