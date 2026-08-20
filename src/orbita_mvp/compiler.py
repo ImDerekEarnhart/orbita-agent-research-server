@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-from .column_semantics import is_support_or_weight_column
+from .column_semantics import is_cluster_identifier_column, is_support_or_weight_column
 from .table_domain import generate_table_candidates
 
 
@@ -58,19 +58,77 @@ class ResearchCompiler:
             }
             | {str(column) for column in df.columns if is_support_or_weight_column(str(column))}
         )
-        excluded_columns = sorted(set(identifier_columns) | set(support_columns))
-        candidates, generation = generate_table_candidates(
-            df,
-            goal=case.get("goal", ""),
-            max_candidates=max_candidates,
-            scout_fraction=scout_fraction,
-            seed=seed,
-            excluded_columns=excluded_columns,
+        cluster_columns = sorted(
+            {
+                str(c["name"])
+                for c in profile.get("column_profiles", [])
+                if c.get("inferred_role") == "cluster_identifier"
+            }
+            | {
+                str(column)
+                for column in df.columns
+                if is_cluster_identifier_column(str(column))
+                and 1 < int(df[column].nunique(dropna=True)) < int(df[column].notna().sum())
+            }
         )
+        excluded_columns = sorted(set(identifier_columns) | set(support_columns) | set(cluster_columns))
+        group_column = cluster_columns[0] if len(cluster_columns) == 1 else None
+        cluster_error: str | None = None
+        if len(cluster_columns) > 1:
+            candidates = []
+            cluster_error = (
+                "Multiple repeated-unit identifiers were detected; choose exactly one independence cluster: "
+                + ", ".join(cluster_columns)
+            )
+            generation = {
+                "strategy": "blocked_ambiguous_cluster_identifier",
+                "seed": seed,
+                "scout_fraction": scout_fraction,
+                "partition_unit": None,
+                "group_column": None,
+                "cluster_identifier_candidates": cluster_columns,
+                "excluded_columns": excluded_columns,
+                "generated_candidates": 0,
+                "candidate_budget": max_candidates,
+                "error": cluster_error,
+            }
+        else:
+            try:
+                candidates, generation = generate_table_candidates(
+                    df,
+                    goal=case.get("goal", ""),
+                    max_candidates=max_candidates,
+                    scout_fraction=scout_fraction,
+                    seed=seed,
+                    excluded_columns=excluded_columns,
+                    group_column=group_column,
+                )
+            except ValueError as exc:
+                if group_column is None:
+                    raise
+                candidates = []
+                cluster_error = str(exc)
+                generation = {
+                    "strategy": "blocked_invalid_cluster_partition",
+                    "seed": seed,
+                    "scout_fraction": scout_fraction,
+                    "partition_unit": "group",
+                    "group_column": group_column,
+                    "cluster_identifier_candidates": cluster_columns,
+                    "excluded_columns": excluded_columns,
+                    "generated_candidates": 0,
+                    "candidate_budget": max_candidates,
+                    "error": cluster_error,
+                }
         assumptions = [
             {
                 "id": "unit_of_analysis",
-                "statement": "Each row is treated as one independent unit unless the researcher says otherwise.",
+                "statement": (
+                    f"Rows sharing {group_column} are treated as one dependence cluster; "
+                    "scout and confirmation partitions keep clusters intact."
+                    if group_column
+                    else "Each row is treated as one independent unit unless the researcher says otherwise."
+                ),
                 "severity": "high",
                 "requires_review": True,
             },
@@ -106,7 +164,9 @@ class ResearchCompiler:
                     }
                 )
         blocking_questions = []
-        if not candidates:
+        if cluster_error:
+            blocking_questions.append(cluster_error)
+        elif not candidates:
             blocking_questions.append(
                 "No defensible automatic candidates remained after identifier and support/count/weight "
                 "columns were excluded. Name an explicit scientific outcome or provide richer measurements."
@@ -258,6 +318,18 @@ class ResearchCompiler:
                         "detail": (
                             "The column describes sample support or weighting and is excluded from "
                             "automatic relation mining."
+                        ),
+                    }
+                )
+            if column.get("inferred_role") == "cluster_identifier":
+                findings.append(
+                    {
+                        "type": "artifact_guard",
+                        "severity": "high",
+                        "title": f"Dependence cluster preserved: {column['name']}",
+                        "detail": (
+                            "Rows sharing this identifier must remain together during scout and confirmation "
+                            "splitting; the identifier is excluded from scientific candidate generation."
                         ),
                     }
                 )
