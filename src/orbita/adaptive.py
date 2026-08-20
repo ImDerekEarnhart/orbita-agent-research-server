@@ -6,21 +6,20 @@ import json
 import re
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .agent_os import (
     AutonomyMode,
+    ComputerAgentRuntime,
     ComputerGoalSpec,
     ComputerGoalStatus,
     ComputerGoalType,
     ComputerPlanSpec,
     ComputerStepSpec,
     ComputerStepStatus,
-    ComputerAgentRuntime,
-    SkillContract,
 )
 from .models import ActorRole, RiskLevel
 
@@ -36,7 +35,7 @@ MAX_TEXT_FIELD_CHARS = 10_000
 
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def new_id(prefix: str) -> str:
@@ -119,7 +118,7 @@ class DesktopSelector:
     index: int | None = None
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "DesktopSelector":
+    def from_dict(cls, value: dict[str, Any]) -> DesktopSelector:
         if not isinstance(value, dict):
             raise TypeError("Desktop selector must be an object")
         selector = cls(
@@ -152,7 +151,7 @@ class DesktopExpectation:
     screenshot_changed: bool | None = None
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any] | None) -> "DesktopExpectation":
+    def from_dict(cls, value: dict[str, Any] | None) -> DesktopExpectation:
         raw = value or {}
         if not isinstance(raw, dict):
             raise TypeError("Desktop expectation must be an object")
@@ -220,7 +219,7 @@ class DesktopActionSpec:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "DesktopActionSpec":
+    def from_dict(cls, value: dict[str, Any]) -> DesktopActionSpec:
         if not isinstance(value, dict):
             raise TypeError("Desktop action must be an object")
         kind = DesktopActionKind(value["kind"])
@@ -305,8 +304,8 @@ class AdaptiveSkillRuntime:
 
     def __init__(
         self,
-        ledger: "EpistemicLedger",
-        provider: "CapabilityProvider | None" = None,
+        ledger: EpistemicLedger,
+        provider: CapabilityProvider | None = None,
         workspace: str | Path | None = None,
     ) -> None:
         self.ledger = ledger
@@ -316,7 +315,7 @@ class AdaptiveSkillRuntime:
         self.artifact_root = self.workspace / "desktop_artifacts"
         self.artifact_root.mkdir(parents=True, exist_ok=True)
 
-    def bind_provider(self, provider: "CapabilityProvider") -> None:
+    def bind_provider(self, provider: CapabilityProvider) -> None:
         self.provider = provider
 
     def status(self) -> dict[str, Any]:

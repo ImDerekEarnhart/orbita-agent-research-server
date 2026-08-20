@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
+import pytest
+
 from orbita_agent import eg_lemma_miner as miner
+from orbita_agent.knowledge import KnowledgeStore
 
 
 def test_curated_knowledge_and_eg_receipts(gateway):
@@ -35,3 +39,22 @@ def test_bounded_graph_analysis_and_lean_export(gateway):
     assert "generatedCertificate_is_valid" in source
     assert "native_decide" in source
     assert "sorry" not in source
+
+
+def test_knowledge_store_refuses_an_unreadable_package_database(tmp_path):
+    invalid = tmp_path / "knowledge.sqlite"
+    invalid.write_bytes(b"not a sqlite database")
+
+    with pytest.raises(RuntimeError, match="Rebuild it with tools/build_knowledge.py"):
+        KnowledgeStore(invalid)
+
+
+def test_knowledge_store_refuses_a_database_without_required_tables(tmp_path):
+    invalid = tmp_path / "knowledge.sqlite"
+    connection = sqlite3.connect(invalid)
+    connection.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    connection.commit()
+    connection.close()
+
+    with pytest.raises(RuntimeError, match="missing tables"):
+        KnowledgeStore(invalid)

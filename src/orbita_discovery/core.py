@@ -4,9 +4,10 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 STATUS = ["unscorable", "refuted", "unknown", "provisional", "challenged", "supported"]
 

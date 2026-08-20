@@ -66,7 +66,7 @@ Expected health metadata includes:
 {
   "status": "ok",
   "product": "orbita-agent-research-server",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "authentication": "oauth-github"
 }
 ```

@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+
+# Preserve the verifier's established `lake env lean ...` command contract
+# while bypassing Lake's repository-materialization phase in production.
+if [ "$#" -lt 2 ] || [ "$1" != "env" ] || [ "$2" != "lean" ]; then
+  echo "offline Lean wrapper accepts only: env lean [arguments...]" >&2
+  exit 64
+fi
+shift 2
+
+lean_path_file=/opt/orbita-language-limit/.orbita-lean-path
+lean_binary=/opt/elan/toolchains/leanprover--lean4---v4.32.1/bin/lean
+
+if [ ! -r "$lean_path_file" ] || [ ! -x "$lean_binary" ]; then
+  echo "frozen offline Lean runtime is incomplete" >&2
+  exit 70
+fi
+
+LEAN_PATH=$(cat "$lean_path_file")
+export LEAN_PATH
+exec "$lean_binary" "$@"

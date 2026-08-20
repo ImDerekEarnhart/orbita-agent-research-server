@@ -29,7 +29,8 @@ from typing import Any
 
 # Formats the ingestor can actually parse, plus the archives this exists to carry.
 UPLOAD_SUFFIXES = {
-    ".csv", ".tsv", ".json", ".jsonl", ".txt", ".md", ".py", ".r", ".tex", ".ipynb",
+    ".csv", ".tsv", ".json", ".jsonl", ".txt", ".md", ".py", ".r", ".tex",
+    ".sql", ".yaml", ".yml", ".toml", ".ipynb",
     ".xlsx", ".xlsm", ".xls", ".parquet", ".pdf", ".docx", ".zip",
 }
 

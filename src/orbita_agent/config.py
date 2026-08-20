@@ -34,6 +34,8 @@ class AgentConfig:
     max_inline_bytes: int = 8_000_000
     max_graph_vertices: int = 128
     max_graph_edges: int = 1_024
+    lean_kernel_root: Path | None = None
+    lean_executable: str = "lake"
 
     @property
     def db_path(self) -> Path:
@@ -42,6 +44,38 @@ class AgentConfig:
     @property
     def improvement_db(self) -> Path:
         return self.home / "orbita_improvements.db"
+
+    @property
+    def external_experiment_db(self) -> Path:
+        return self.home / "orbita_external_experiments.db"
+
+    @property
+    def blind_prediction_db(self) -> Path:
+        return self.home / "orbita_blind_predictions.db"
+
+    @property
+    def blind_scoring_db(self) -> Path:
+        return self.home / "orbita_blind_scoring.db"
+
+    @property
+    def general_problem_loop_db(self) -> Path:
+        return self.home / "orbita_general_problem_loops.db"
+
+    @property
+    def candidate_execution_db(self) -> Path:
+        return self.home / "orbita_candidate_execution.db"
+
+    @property
+    def evidence_receipt_db(self) -> Path:
+        return self.home / "orbita_evidence_receipts.db"
+
+    @property
+    def epistemic_db(self) -> Path:
+        return self.home / "orbita_epistemic.db"
+
+    @property
+    def execution_workspace(self) -> Path:
+        return self.home / "external_executions"
 
     @property
     def workspace(self) -> Path:
@@ -88,4 +122,10 @@ class AgentConfig:
             max_inline_bytes=int(os.getenv("ORBITA_AGENT_MAX_INLINE_BYTES", "8000000")),
             max_graph_vertices=int(os.getenv("ORBITA_AGENT_MAX_GRAPH_VERTICES", "128")),
             max_graph_edges=int(os.getenv("ORBITA_AGENT_MAX_GRAPH_EDGES", "1024")),
+            lean_kernel_root=(
+                Path(os.environ["ORBITA_LANGUAGE_LIMIT_KERNEL_ROOT"]).expanduser()
+                if os.getenv("ORBITA_LANGUAGE_LIMIT_KERNEL_ROOT")
+                else None
+            ),
+            lean_executable=os.getenv("ORBITA_LEAN_EXECUTABLE", "lake"),
         )

@@ -4,6 +4,7 @@ import hashlib
 import json
 import mimetypes
 import shutil
+import warnings
 import zipfile
 from dataclasses import asdict
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Any
 import pandas as pd
 
 from .chatgpt_export import looks_like_chatgpt_export, messages_to_frame, parse_conversations
+from .column_semantics import is_cluster_identifier_column, is_support_or_weight_column
 
 
 class IngestionError(RuntimeError):
@@ -58,7 +60,9 @@ def profile_dataframe(df: pd.DataFrame) -> dict[str, Any]:
             normalized_hint = name.lower().replace(" ", "_")
             parsed_dt = None
             if any(token in normalized_hint for token in ("date", "time", "timestamp")):
-                parsed_dt = pd.to_datetime(s, errors="coerce", utc=True)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    parsed_dt = pd.to_datetime(s, errors="coerce", utc=True)
             if parsed_dt is not None and len(s) and float(parsed_dt.notna().mean()) >= 0.9:
                 kind = "datetime"
                 role = "time"
@@ -75,6 +79,11 @@ def profile_dataframe(df: pd.DataFrame) -> dict[str, Any]:
             role = "time"
         if any(token in normalized for token in ("label", "class", "group", "condition", "diagnosis", "treatment")):
             role = "group_or_category"
+        if kind == "numeric" and is_support_or_weight_column(name):
+            role = "support_or_weight"
+        nonmissing = int(s.notna().sum())
+        if is_cluster_identifier_column(name) and 1 < unique < nonmissing:
+            role = "cluster_identifier"
         profile["column_profiles"].append(
             {
                 "name": name,
@@ -96,16 +105,32 @@ class ArtifactIngestor:
     # Suffixes never opened as an archive member. Nested archives are the classic zip
     # bomb shape, so they are preserved and inventoried but never expanded.
     NESTED_ARCHIVE_SUFFIXES = {".zip", ".gz", ".tar", ".tgz", ".bz2", ".xz", ".7z", ".rar"}
+    TEXT_SUFFIXES = {".txt", ".md", ".py", ".r", ".tex", ".sh", ".sql", ".yaml", ".yml", ".toml", ".names"}
+    PARSEABLE_MEMBER_SUFFIXES = {
+        ".csv", ".tsv", ".xlsx", ".xlsm", ".xls", ".parquet",
+        ".json", ".jsonl", ".ipynb", ".pdf", ".docx",
+    } | TEXT_SUFFIXES
 
     def __init__(
         self,
         max_unpacked_bytes: int = 250_000_000,
         max_members_parsed: int = 500,
-        max_member_bytes: int = 100_000_000,
+        max_member_bytes: int = 20_000_000,
     ):
         self.max_unpacked_bytes = max_unpacked_bytes
         self.max_members_parsed = max_members_parsed
         self.max_member_bytes = max_member_bytes
+
+    def describe(self) -> dict[str, Any]:
+        return {
+            "zip_strategy": "complete_inventory_bounded_selective_parse",
+            "max_extracted_working_set_bytes": self.max_unpacked_bytes,
+            "max_members_parsed": self.max_members_parsed,
+            "max_member_bytes": self.max_member_bytes,
+            "priority": "research text and scripts, then supported tables smallest-first",
+            "large_members": "inventoried with size and compressed size; not parsed automatically",
+            "semantic_boundary": "inventory and deterministic profiles are not whole-archive semantic understanding",
+        }
 
     def ingest(self, source: str | Path, destination_dir: str | Path) -> dict[str, Any]:
         source = Path(source)
@@ -171,8 +196,13 @@ class ArtifactIngestor:
                             result["profile"]["json_record_key"] = key
                             return result
                 return self._text_result(base, json.dumps(obj, indent=2), destination_dir, stored.stem)
-            if suffix in {".txt", ".md", ".py", ".r", ".tex"}:
-                return self._text_result(base, stored.read_text(encoding="utf-8", errors="replace"), destination_dir, stored.stem)
+            if suffix in self.TEXT_SUFFIXES:
+                return self._text_result(
+                    base,
+                    stored.read_text(encoding="utf-8", errors="replace"),
+                    destination_dir,
+                    stored.stem,
+                )
             if suffix == ".pdf":
                 from pypdf import PdfReader
 
@@ -232,60 +262,116 @@ class ArtifactIngestor:
     def _zip_result(self, base: dict[str, Any], stored: Path, destination_dir: Path) -> dict[str, Any]:
         extract_dir = destination_dir / f"{stored.stem}_unpacked"
         extract_dir.mkdir(parents=True, exist_ok=True)
-        total = 0
+        declared_total = 0
+        extracted_total = 0
         members: list[dict[str, Any]] = []
         with zipfile.ZipFile(stored) as archive:
-            for info in archive.infolist():
-                total += info.file_size
-                if total > self.max_unpacked_bytes:
-                    raise IngestionError("ZIP exceeds safe unpacked-size limit")
+            infos = archive.infolist()
+            seen_targets: set[Path] = set()
+            def processing_priority(info: zipfile.ZipInfo) -> tuple[int, int, str]:
+                suffix = Path(info.filename).suffix.lower()
+                # Research declarations, scripts, manifests, and prose carry the
+                # programme's logic and are cheap to inspect. Profile small tables next;
+                # giant evidence matrices remain in the complete manifest for a later
+                # targeted/sample pass instead of exhausting RAM during blind intake.
+                kind = 0 if suffix in self.TEXT_SUFFIXES else 1 if suffix in self.PARSEABLE_MEMBER_SUFFIXES else 2
+                return kind, int(info.file_size), info.filename.casefold()
+
+            for info in sorted(infos, key=processing_priority):
+                declared_total += info.file_size
                 target = (extract_dir / info.filename).resolve()
                 if extract_dir.resolve() not in target.parents and target != extract_dir.resolve():
                     raise IngestionError("ZIP contains an unsafe path")
-            archive.extractall(extract_dir)
-        # Members are parsed, not merely listed. An archive whose contents stay opaque
-        # is preserved provenance and nothing else; the point of accepting a zip is to
-        # reach the tables and documents inside it.
-        parsed_count = 0
-        skipped: list[dict[str, Any]] = []
-        for path in sorted(extract_dir.rglob("*")):
-            if not path.is_file():
-                continue
-            size_bytes = path.stat().st_size
-            entry: dict[str, Any] = {
-                "name": str(path.relative_to(extract_dir)),
-                "size_bytes": size_bytes,
-            }
-            suffix = path.suffix.lower()
-            if suffix in self.NESTED_ARCHIVE_SUFFIXES:
-                entry["parse_status"] = "skipped"
-                entry["skip_reason"] = "nested archives are preserved but never expanded"
-                skipped.append(entry)
-            elif size_bytes > self.max_member_bytes:
-                entry["parse_status"] = "skipped"
-                entry["skip_reason"] = f"member exceeds {self.max_member_bytes} bytes"
-                skipped.append(entry)
-            elif parsed_count >= self.max_members_parsed:
-                entry["parse_status"] = "skipped"
-                entry["skip_reason"] = f"only the first {self.max_members_parsed} members are parsed"
-                skipped.append(entry)
-            else:
-                # Reuse the top-level dispatch so every parser and its error handling
-                # apply identically to a member. The member already sits in its own
-                # directory, so this parses in place without copying.
-                member = self.ingest(path, path.parent)
-                parsed_count += 1
-                entry.update(
-                    {
-                        "parse_status": member["parse_status"],
-                        "artifact_kind": member["artifact_kind"],
-                        "sha256": member["sha256"],
-                        "extracted_path": member["extracted_path"],
-                        "profile": member["profile"],
-                        "error": member["error"],
-                    }
-                )
-            members.append(entry)
+                if target in seen_targets and not info.is_dir():
+                    raise IngestionError("ZIP contains duplicate member paths")
+                seen_targets.add(target)
+
+            # Inventory every member, but extract only supported members that fit the
+            # bounded working-set budget. This lets a multi-gigabyte archive be mapped
+            # without inflating the whole thing onto a fixed-size service volume.
+            parsed_count = 0
+            skipped: list[dict[str, Any]] = []
+            for member_index, info in enumerate(sorted(infos, key=processing_priority)):
+                if info.is_dir():
+                    continue
+                original = Path(info.filename)
+                suffix = original.suffix.lower()
+                safe_stem = "".join(ch for ch in original.stem if ch.isalnum() or ch in "._-")[:60] or "member"
+                name_hash = hashlib.sha256(info.filename.encode("utf-8")).hexdigest()[:12]
+                # Flat, bounded working names avoid Windows path-length failures while
+                # the complete original archive path remains in the manifest.
+                path = (extract_dir / f"{member_index:04d}_{name_hash}_{safe_stem}{suffix[:16]}").resolve()
+                size_bytes = int(info.file_size)
+                entry: dict[str, Any] = {
+                    "name": info.filename.replace("\\", "/"),
+                    "size_bytes": size_bytes,
+                    "compressed_bytes": int(info.compress_size),
+                }
+                unix_mode = (info.external_attr >> 16) & 0o170000
+                if unix_mode == 0o120000:
+                    entry["parse_status"] = "skipped"
+                    entry["skip_reason"] = "symbolic links are inventoried but never extracted"
+                elif info.flag_bits & 0x1:
+                    entry["parse_status"] = "skipped"
+                    entry["skip_reason"] = "encrypted members require a separately reviewed intake path"
+                elif suffix in self.NESTED_ARCHIVE_SUFFIXES:
+                    entry["parse_status"] = "skipped"
+                    entry["skip_reason"] = "nested archives are preserved but never expanded"
+                elif suffix not in self.PARSEABLE_MEMBER_SUFFIXES:
+                    entry["parse_status"] = "skipped"
+                    entry["skip_reason"] = "member type is inventoried but not parsed"
+                elif size_bytes > self.max_member_bytes:
+                    entry["parse_status"] = "skipped"
+                    entry["skip_reason"] = f"member exceeds {self.max_member_bytes} bytes"
+                elif parsed_count >= self.max_members_parsed:
+                    entry["parse_status"] = "skipped"
+                    entry["skip_reason"] = f"only the first {self.max_members_parsed} members are parsed"
+                elif extracted_total + size_bytes > self.max_unpacked_bytes:
+                    entry["parse_status"] = "skipped"
+                    entry["skip_reason"] = (
+                        f"parsing this member would exceed the {self.max_unpacked_bytes} byte working-set budget"
+                    )
+                else:
+                    try:
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        with archive.open(info) as source, path.open("wb") as sink:
+                            shutil.copyfileobj(source, sink, length=1024 * 1024)
+                        extracted_total += size_bytes
+                        member = self.ingest(path, path.parent)
+                        parsed_count += 1
+                        entry.update(
+                            {
+                                "parse_status": member["parse_status"],
+                                "artifact_kind": member["artifact_kind"],
+                                "sha256": member["sha256"],
+                                "extracted_path": member["extracted_path"],
+                                "profile": member["profile"],
+                                "error": member["error"],
+                            }
+                        )
+                    except Exception as exc:  # one inherited member must not erase the archive inventory
+                        path.unlink(missing_ok=True)
+                        entry["parse_status"] = "failed"
+                        entry["error"] = f"{type(exc).__name__} while extracting or parsing this member"
+                if entry["parse_status"] == "skipped":
+                    skipped.append(entry)
+                members.append(entry)
+
+        manifest_path = destination_dir / f"{stored.stem}.archive-manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "archive": stored.name,
+                    "member_count": len(members),
+                    "declared_unpacked_bytes": declared_total,
+                    "extracted_working_set_bytes": extracted_total,
+                    "members": members,
+                },
+                indent=2,
+                default=str,
+            ),
+            encoding="utf-8",
+        )
 
         tables = [m for m in members if m.get("artifact_kind") == "table"]
         base.update(
@@ -299,7 +385,10 @@ class ArtifactIngestor:
                     "parsed_member_count": parsed_count,
                     "skipped_member_count": len(skipped),
                     "table_member_count": len(tables),
-                    "unpacked_bytes": total,
+                    "declared_unpacked_bytes": declared_total,
+                    "extracted_working_set_bytes": extracted_total,
+                    "working_set_limit_bytes": self.max_unpacked_bytes,
+                    "manifest_path": str(manifest_path.resolve()),
                     "members_truncated_in_profile": len(members) > 200,
                 },
             }

@@ -8,10 +8,11 @@ import shutil
 import subprocess
 import tomllib
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from .execution import (
     ContainerExecutionSpec,
@@ -36,7 +37,7 @@ _SECRET_PATTERNS = (
 
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def new_id(prefix: str) -> str:
@@ -144,7 +145,7 @@ class CodingTestSpec:
             raise ValueError("max_bytes is outside the safe range")
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "CodingTestSpec":
+    def from_dict(cls, value: dict[str, Any]) -> CodingTestSpec:
         return cls(
             image=str(value["image"]),
             command=tuple(str(x) for x in value["command"]),
@@ -181,7 +182,7 @@ class CodingRuntime:
     Orbita and are never delegated to a proposal model.
     """
 
-    def __init__(self, ledger: "EpistemicLedger", workspace: str | Path | None = None):
+    def __init__(self, ledger: EpistemicLedger, workspace: str | Path | None = None):
         self.ledger = ledger
         self.workspace = Path(workspace or (ledger.db.path.parent / "coding_workspace")).expanduser().resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)

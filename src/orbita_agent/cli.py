@@ -10,9 +10,9 @@ from typing import Any
 
 from .config import AgentConfig
 from .gateway import APPROVAL_PHRASE, AgentGateway
-from .workspace_migration import apply_migration, plan_migration
 from .mcp_server import build_mcp_server
 from .tenancy import TenantResolutionError, build_registry
+from .workspace_migration import apply_migration, plan_migration
 
 
 def _config(home: str | None) -> AgentConfig:
@@ -23,6 +23,8 @@ def _config(home: str | None) -> AgentConfig:
         max_inline_bytes=base.max_inline_bytes,
         max_graph_vertices=base.max_graph_vertices,
         max_graph_edges=base.max_graph_edges,
+        lean_kernel_root=base.lean_kernel_root,
+        lean_executable=base.lean_executable,
     )
 
 

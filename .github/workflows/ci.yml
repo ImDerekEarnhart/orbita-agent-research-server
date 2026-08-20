@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: ruff check src tests
+      - run: pytest -q
+
+  language-limit-lean:
+    runs-on: ubuntu-latest
+    env:
+      KERNEL_ROOT: ${{ github.workspace }}/src/orbita_agent/resources/language_limit_kernel
+      ORBITA_LANGUAGE_LIMIT_TEST_KERNEL: ${{ github.workspace }}/src/orbita_agent/resources/language_limit_kernel
+      ORBITA_RUN_LEAN_INTEGRATION: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install exact Lean toolchain manager
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Restore exact rc1 source bytes and build kernel
+        working-directory: ${{ env.KERNEL_ROOT }}
+        run: |
+          for file in MANIFEST.json lake-manifest.json lakefile.toml lean-toolchain OrbitaLanguageLimit.lean \
+            OrbitaLanguageLimit/Basic.lean OrbitaLanguageLimit/Certificate.lean OrbitaLanguageLimit/Example.lean \
+            OrbitaLanguageLimit/CoherentStateBridge.lean OrbitaLanguageLimit/OrbitaIssuedCertificate.lean; do
+            if [ "$(tail -c 1 "$file" | od -An -t u1 | tr -d ' ')" = "10" ]; then truncate -s -1 "$file"; fi
+          done
+          echo "f25e21067c53116b8d70e80cc375d2205b459f0c01af3c095c758b288f54379c  MANIFEST.json" | sha256sum -c -
+          lake exe cache get
+          lake build
+      - name: Run real deterministic JSON-to-Lean acceptance gate
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          pytest tests/test_language_limit_verification.py::test_real_lean_kernel_accepts_generated_certificate -q

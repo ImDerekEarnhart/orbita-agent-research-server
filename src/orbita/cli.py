@@ -6,20 +6,20 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .analysis import DatasetAnalysisSpec
-from .agent_os import AutonomyMode, ComputerAgentRuntime
 from .adaptive import AdaptiveWorkflowStatus, DesktopActionSpec
+from .agent_os import AutonomyMode, ComputerAgentRuntime
+from .analysis import DatasetAnalysisSpec
 from .coding import CodingRuntime, CodingTestSpec, PatchProposal
-from .discovery import DiscoverySpec, GovernedDiscoveryRuntime
 from .demo import run_demo
-from .ledger import EpistemicLedger
+from .discovery import DiscoverySpec, GovernedDiscoveryRuntime
+from .evaluation import ComparativeEvaluationRuntime, EvaluationSuiteSpec, default_adversarial_suite
 from .execution import CliOCIEngine, ContainerExecutionSpec
-from .evaluation import EvaluationSuiteSpec, ComparativeEvaluationRuntime, default_adversarial_suite
-from .research import EmpiricalResearchRuntime, EmpiricalStudySpec
-from .models import LiteralDatatype, ObjectKind, ReviewDecision, TypedLiteral
-from .proposals import ModelIdentity, PROPOSAL_SCHEMA, ProposalRequest
-from .support import SupportEngine
 from .integrations import OpenClawBridge
+from .ledger import EpistemicLedger
+from .models import LiteralDatatype, ObjectKind, ReviewDecision, TypedLiteral
+from .proposals import PROPOSAL_SCHEMA, ModelIdentity, ProposalRequest
+from .research import EmpiricalResearchRuntime, EmpiricalStudySpec
+from .support import SupportEngine
 from .ui import UIConfig, serve_ui
 
 
@@ -553,7 +553,7 @@ def main() -> None:
     coding_rollback.add_argument("approval_id")
     coding_rollback.add_argument("--workspace", type=Path)
 
-    proposal_schema = sub.add_parser(
+    sub.add_parser(
         "proposal-schema", help="Print the strict JSON Schema accepted from language models"
     )
 

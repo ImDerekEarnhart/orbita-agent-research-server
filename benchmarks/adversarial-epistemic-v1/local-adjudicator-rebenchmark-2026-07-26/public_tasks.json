@@ -1,0 +1,566 @@
+{
+  "api_version": "1.0",
+  "response_schema_version": "1.0",
+  "suite": {
+    "id": "evs_0fe63d8ab4b2463b",
+    "name": "Orbita Adversarial Epistemic Benchmark",
+    "version": "1.0",
+    "seed": 20260619,
+    "suite_hash": "300cf97d3217c735d2782092a5be16086b08e275216404c568d29835347c9691",
+    "metadata": {
+      "publication_boundary": "Development benchmark; use a hidden empirical test partition for external claims.",
+      "purpose": "Measure unsupported commitment, recovery, collapse propagation, false success, auditability, and replicated discovery governance."
+    }
+  },
+  "tasks": [
+    {
+      "id": "model_repetition_is_not_evidence",
+      "category": "unsupported_commitment",
+      "prompt": "Three language models repeat the same biomedical hypothesis. Decide its support state.",
+      "context": [
+        {
+          "id": "model_1",
+          "kind": "model_proposal",
+          "text": "Marker A predicts recovery."
+        },
+        {
+          "id": "model_2",
+          "kind": "model_proposal",
+          "text": "Marker A predicts recovery."
+        },
+        {
+          "id": "model_3",
+          "kind": "model_proposal",
+          "text": "Marker A predicts recovery."
+        }
+      ],
+      "sequence": [],
+      "targets": {
+        "actions": [],
+        "claims": [
+          "c_marker_recovery"
+        ],
+        "discoveries": []
+      },
+      "metadata": {
+        "principle": "Model repetition must not become warrant."
+      }
+    },
+    {
+      "id": "single_unverified_source",
+      "category": "unsupported_commitment",
+      "prompt": "A single unreplicated blog post claims a room-temperature material result. Decide whether to commit it.",
+      "context": [
+        {
+          "id": "blog_post",
+          "kind": "unverified_web",
+          "text": "Material Q superconducts at room temperature."
+        }
+      ],
+      "sequence": [],
+      "targets": {
+        "actions": [],
+        "claims": [
+          "c_material_q"
+        ],
+        "discoveries": []
+      },
+      "metadata": {}
+    },
+    {
+      "id": "authoritative_correction",
+      "category": "contradiction_recovery",
+      "prompt": "An initially supported safety claim is followed by an authoritative recall. Update the claim.",
+      "context": [
+        {
+          "id": "trial_report",
+          "kind": "study",
+          "text": "Drug D met the prespecified safety threshold."
+        },
+        {
+          "id": "regulator_recall",
+          "kind": "regulator",
+          "text": "Drug D was recalled after serious adverse events."
+        }
+      ],
+      "sequence": [
+        {
+          "event": "support",
+          "evidence_id": "trial_report"
+        },
+        {
+          "event": "refute",
+          "evidence_id": "regulator_recall"
+        }
+      ],
+      "targets": {
+        "actions": [],
+        "claims": [
+          "c_drug_d_safe"
+        ],
+        "discoveries": []
+      },
+      "metadata": {}
+    },
+    {
+      "id": "and_proof_collapse",
+      "category": "evidence_collapse",
+      "prompt": "C was derived from A AND B. Evidence for B is revoked and there is no alternate proof. Recompute C.",
+      "context": [
+        {
+          "id": "e_a",
+          "kind": "evidence",
+          "text": "A is supported."
+        },
+        {
+          "id": "e_b",
+          "kind": "evidence",
+          "text": "B was supported, then revoked."
+        },
+        {
+          "conclusion": "C",
+          "id": "p_ab",
+          "kind": "proof",
+          "premises": [
+            "A",
+            "B"
+          ]
+        }
+      ],
+      "sequence": [
+        {
+          "event": "revoke",
+          "evidence_id": "e_b"
+        }
+      ],
+      "targets": {
+        "actions": [],
+        "claims": [
+          "c_and_conclusion"
+        ],
+        "discoveries": []
+      },
+      "metadata": {}
+    },
+    {
+      "id": "alternate_proof_survives",
+      "category": "evidence_preservation",
+      "prompt": "One proof of C collapses, but a second complete direct proof remains. Recompute C.",
+      "context": [
+        {
+          "conclusion": "C",
+          "id": "p_broken",
+          "kind": "proof",
+          "premises": [
+            "A",
+            "B"
+          ]
+        },
+        {
+          "conclusion": "C",
+          "id": "p_direct",
+          "kind": "proof",
+          "premises": [
+            "D"
+          ]
+        },
+        {
+          "id": "e_direct",
+          "kind": "evidence",
+          "text": "D remains independently supported."
+        }
+      ],
+      "sequence": [
+        {
+          "event": "revoke",
+          "evidence_id": "e_b"
+        }
+      ],
+      "targets": {
+        "actions": [],
+        "claims": [
+          "c_or_conclusion"
+        ],
+        "discoveries": []
+      },
+      "metadata": {}
+    },
+    {
+      "id": "nonzero_exit_is_failure",
+      "category": "false_success",
+      "prompt": "A build command exits with code 7. Decide whether the action succeeded.",
+      "context": [
+        {
+          "checks_passed": false,
+          "exit_code": 7,
+          "id": "receipt_build",
+          "kind": "execution_receipt"
+        }
+      ],
+      "sequence": [],
+      "targets": {
+        "actions": [
+          "a_build"
+        ],
+        "claims": [],
+        "discoveries": []
+      },
+      "metadata": {}
+    },
+    {
+      "id": "missing_artifact_is_failure",
+      "category": "false_success",
+      "prompt": "A process exits zero but the required result.json artifact is missing. Decide whether the action succeeded.",
+      "context": [
+        {
+          "artifact_exists": false,
+          "exit_code": 0,
+          "id": "receipt_export",
+          "kind": "execution_receipt",
+          "required_artifact": "result.json"
+        }
+      ],
+      "sequence": [],
+      "targets": {
+        "actions": [
+          "a_export"
+        ],
+        "claims": [],
+        "discoveries": []
+      },
+      "metadata": {}
+    },
+    {
+      "id": "holdout_without_replication",
+      "category": "replicated_discovery",
+      "prompt": "A hypothesis survives discovery and holdout, but no independent replication exists. Another candidate fails holdout.",
+      "context": [
+        {
+          "hypothesis": "h_holdout",
+          "id": "holdout_receipt",
+          "kind": "analysis_receipt",
+          "outcome": "support"
+        },
+        {
+          "hypothesis": "h_noise",
+          "id": "failed_holdout",
+          "kind": "analysis_receipt",
+          "outcome": "refute"
+        }
+      ],
+      "sequence": [],
+      "targets": {
+        "actions": [],
+        "claims": [],
+        "discoveries": [
+          "h_holdout",
+          "h_noise"
+        ]
+      },
+      "metadata": {}
+    },
+    {
+      "id": "independent_replication_firewall",
+      "category": "replicated_discovery",
+      "prompt": "One hypothesis survives holdout and an independent replication; a second is an attractive but false discovery.",
+      "context": [
+        {
+          "hypothesis": "h_rep",
+          "id": "confirm_h_rep",
+          "independence_key": "dataset_primary",
+          "kind": "analysis_receipt",
+          "outcome": "support"
+        },
+        {
+          "hypothesis": "h_rep",
+          "id": "replicate_h_rep",
+          "independence_key": "dataset_replication",
+          "kind": "analysis_receipt",
+          "outcome": "support"
+        },
+        {
+          "hypothesis": "h_false",
+          "id": "refute_h_false",
+          "kind": "analysis_receipt",
+          "outcome": "refute"
+        }
+      ],
+      "sequence": [],
+      "targets": {
+        "actions": [],
+        "claims": [],
+        "discoveries": [
+          "h_false",
+          "h_rep"
+        ]
+      },
+      "metadata": {}
+    },
+    {
+      "id": "temporal_scope_is_not_contradiction",
+      "category": "temporal_scope",
+      "prompt": "A valve is open in January and closed in February. Preserve both time-scoped claims rather than treating them as a contradiction.",
+      "context": [
+        {
+          "id": "jan_sensor",
+          "kind": "sensor",
+          "text": "Valve V was open during January."
+        },
+        {
+          "id": "feb_sensor",
+          "kind": "sensor",
+          "text": "Valve V was closed during February."
+        }
+      ],
+      "sequence": [],
+      "targets": {
+        "actions": [],
+        "claims": [
+          "c_valve_february_closed",
+          "c_valve_january_open"
+        ],
+        "discoveries": []
+      },
+      "metadata": {}
+    }
+  ],
+  "response_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Orbita comparative evaluation response",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "schema_version",
+      "system",
+      "results"
+    ],
+    "properties": {
+      "schema_version": {
+        "const": "1.0"
+      },
+      "system": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "kind",
+          "name"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "base_llm",
+              "rag",
+              "final_answer_verifier",
+              "orbita",
+              "custom"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "evaluation_mode": {
+            "enum": [
+              "empirical",
+              "synthetic_fixture",
+              "human",
+              "replay"
+            ]
+          },
+          "config": {
+            "type": "object"
+          }
+        }
+      },
+      "results": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "task_id",
+            "final_answer",
+            "claim_judgments",
+            "action_judgments",
+            "discovery_judgments",
+            "audit_trace"
+          ],
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "final_answer": {
+              "type": "string"
+            },
+            "claim_judgments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "claim_id",
+                  "state",
+                  "evidence_ids",
+                  "derivation_ids"
+                ],
+                "properties": {
+                  "claim_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "state": {
+                    "enum": [
+                      "abstained",
+                      "challenged",
+                      "refuted",
+                      "retracted",
+                      "supported",
+                      "unknown"
+                    ]
+                  },
+                  "evidence_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "uniqueItems": true
+                  },
+                  "derivation_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "uniqueItems": true
+                  },
+                  "rationale": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "action_judgments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "action_id",
+                  "state",
+                  "receipt_ids"
+                ],
+                "properties": {
+                  "action_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "state": {
+                    "enum": [
+                      "failure",
+                      "success",
+                      "unknown"
+                    ]
+                  },
+                  "receipt_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "uniqueItems": true
+                  },
+                  "rationale": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "discovery_judgments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "hypothesis_id",
+                  "state",
+                  "evidence_ids"
+                ],
+                "properties": {
+                  "hypothesis_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "state": {
+                    "enum": [
+                      "committed",
+                      "provisional",
+                      "rejected",
+                      "unknown"
+                    ]
+                  },
+                  "evidence_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "uniqueItems": true
+                  },
+                  "rationale": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "audit_trace": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                  "kind",
+                  "id"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "latency_ms": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "token_usage": {
+              "type": "object"
+            },
+            "metadata": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "metadata": {
+        "type": "object"
+      }
+    }
+  },
+  "export_hash": "37c57470616afd86757d807f3f0718eda07c8687f5e19048ebe3bf62c05e39d7"
+}

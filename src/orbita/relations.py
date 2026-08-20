@@ -5,8 +5,9 @@ import json
 import math
 import re
 import unicodedata
-from datetime import date, datetime, timezone
-from typing import TYPE_CHECKING, Any, Iterable
+from collections.abc import Iterable
+from datetime import UTC, date, datetime
+from typing import TYPE_CHECKING, Any
 
 from .models import (
     ActorRole,
@@ -63,7 +64,7 @@ def normalize_temporal(value: str | date | datetime | None) -> str | None:
     if isinstance(value, datetime):
         parsed = value
     elif isinstance(value, date):
-        parsed = datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+        parsed = datetime(value.year, value.month, value.day, tzinfo=UTC)
     elif isinstance(value, str):
         text = value.strip()
         if not text:
@@ -71,7 +72,7 @@ def normalize_temporal(value: str | date | datetime | None) -> str | None:
         try:
             if "T" not in text and " " not in text:
                 d = date.fromisoformat(text)
-                parsed = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+                parsed = datetime(d.year, d.month, d.day, tzinfo=UTC)
             else:
                 parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
         except ValueError as exc:
@@ -79,8 +80,8 @@ def normalize_temporal(value: str | date | datetime | None) -> str | None:
     else:
         raise TypeError(f"Unsupported temporal value: {type(value).__name__}")
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc).isoformat()
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).isoformat()
 
 
 def intervals_overlap(
@@ -148,7 +149,7 @@ class RelationStore:
     collapse when premises fail, and gate actions exactly like a text claim.
     """
 
-    def __init__(self, ledger: "EpistemicLedger"):
+    def __init__(self, ledger: EpistemicLedger):
         self.ledger = ledger
 
     # ------------------------------------------------------------------

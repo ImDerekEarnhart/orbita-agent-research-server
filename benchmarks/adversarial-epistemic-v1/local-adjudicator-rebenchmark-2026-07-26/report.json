@@ -1,0 +1,231 @@
+{
+  "api_version": "1.0",
+  "suite": {
+    "id": "evs_0fe63d8ab4b2463b",
+    "name": "Orbita Adversarial Epistemic Benchmark",
+    "version": "1.0",
+    "suite_hash": "300cf97d3217c735d2782092a5be16086b08e275216404c568d29835347c9691",
+    "tasks": 10
+  },
+  "interpretation_boundary": "Empirical comparison of submitted system outputs.",
+  "evaluation_modes": [
+    "empirical"
+  ],
+  "ranking": [
+    {
+      "rank": 1,
+      "run_id": "evr_d9eb91f5f4c74729",
+      "system": {
+        "kind": "orbita",
+        "name": "Orbita deterministic adjudicator",
+        "version": "1.0",
+        "provider": "local",
+        "evaluation_mode": "empirical",
+        "config": {
+          "condition": "local-adjudicator",
+          "full_orbita_runtime": true,
+          "model_calls": 0,
+          "network_calls": 0
+        },
+        "system_hash": "8e33141f7a792cad715b8fd027a03eaafb8a8573ebbfa536a47197c5b3a8033d"
+      },
+      "metrics": {
+        "by_category": {
+          "contradiction_recovery": {
+            "mean_score": 1.0,
+            "tasks": 1
+          },
+          "evidence_collapse": {
+            "mean_score": 1.0,
+            "tasks": 1
+          },
+          "evidence_preservation": {
+            "mean_score": 1.0,
+            "tasks": 1
+          },
+          "false_success": {
+            "mean_score": 1.0,
+            "tasks": 2
+          },
+          "replicated_discovery": {
+            "mean_score": 1.0,
+            "tasks": 2
+          },
+          "temporal_scope": {
+            "mean_score": 1.0,
+            "tasks": 1
+          },
+          "unsupported_commitment": {
+            "mean_score": 1.0,
+            "tasks": 2
+          }
+        },
+        "counts": {
+          "audit_reference_required": 4,
+          "audit_reference_valid": 4,
+          "collapse_correct": 4,
+          "collapse_opportunities": 4,
+          "committed_discoveries": 1,
+          "correct_committed_discoveries": 1,
+          "failed_action_opportunities": 2,
+          "false_successes": 0,
+          "gold_replicated_discoveries": 1,
+          "recovered_replicated_discoveries": 1,
+          "recoveries": 1,
+          "recovery_opportunities": 1,
+          "target_state_opportunities": 13,
+          "target_states_correct": 13,
+          "task_covered": 10,
+          "unsupported_commitments": 0,
+          "unsupported_opportunities": 4
+        },
+        "mean_task_score": 1.0,
+        "overall_score": 1.0,
+        "rates": {
+          "adjudication_accuracy": 1.0,
+          "audit_completeness": 1.0,
+          "contradiction_recovery_rate": 1.0,
+          "coverage": 1.0,
+          "evidence_collapse_accuracy": 1.0,
+          "false_success_rate": 0.0,
+          "replicated_discovery_precision": 1.0,
+          "replicated_discovery_recall": 1.0,
+          "unsupported_commitment_rate": 0.0
+        },
+        "task_scores": {
+          "alternate_proof_survives": 1.0,
+          "and_proof_collapse": 1.0,
+          "authoritative_correction": 1.0,
+          "holdout_without_replication": 1.0,
+          "independent_replication_firewall": 1.0,
+          "missing_artifact_is_failure": 1.0,
+          "model_repetition_is_not_evidence": 1.0,
+          "nonzero_exit_is_failure": 1.0,
+          "single_unverified_source": 1.0,
+          "temporal_scope_is_not_contradiction": 1.0
+        }
+      },
+      "audit_time": {
+        "completed_tasks": 0,
+        "total_seconds": 0,
+        "median_seconds": null
+      },
+      "integrity_valid": true
+    },
+    {
+      "rank": 2,
+      "run_id": "evr_d0959a34cd6f45eb",
+      "system": {
+        "kind": "base_llm",
+        "name": "gpt-5.6-sol \u2014 direct",
+        "version": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "evaluation_mode": "empirical",
+        "config": {
+          "condition": "direct",
+          "full_orbita_runtime": false,
+          "temperature": "provider default"
+        },
+        "system_hash": "e4713cdb9d502aff40b89688318369b27518009701cd5964bcb1c911a7ff0301"
+      },
+      "metrics": {
+        "by_category": {
+          "contradiction_recovery": {
+            "mean_score": 0.6666666666666666,
+            "tasks": 1
+          },
+          "evidence_collapse": {
+            "mean_score": 1.0,
+            "tasks": 1
+          },
+          "evidence_preservation": {
+            "mean_score": 1.0,
+            "tasks": 1
+          },
+          "false_success": {
+            "mean_score": 1.0,
+            "tasks": 2
+          },
+          "replicated_discovery": {
+            "mean_score": 1.0,
+            "tasks": 2
+          },
+          "temporal_scope": {
+            "mean_score": 1.0,
+            "tasks": 1
+          },
+          "unsupported_commitment": {
+            "mean_score": 1.0,
+            "tasks": 2
+          }
+        },
+        "counts": {
+          "audit_reference_required": 4,
+          "audit_reference_valid": 4,
+          "collapse_correct": 4,
+          "collapse_opportunities": 4,
+          "committed_discoveries": 1,
+          "correct_committed_discoveries": 1,
+          "failed_action_opportunities": 2,
+          "false_successes": 0,
+          "gold_replicated_discoveries": 1,
+          "recovered_replicated_discoveries": 1,
+          "recoveries": 1,
+          "recovery_opportunities": 1,
+          "target_state_opportunities": 13,
+          "target_states_correct": 12,
+          "task_covered": 10,
+          "unsupported_commitments": 0,
+          "unsupported_opportunities": 4
+        },
+        "mean_task_score": 0.9666666666666666,
+        "overall_score": 0.9914529914529915,
+        "rates": {
+          "adjudication_accuracy": 0.9230769230769231,
+          "audit_completeness": 1.0,
+          "contradiction_recovery_rate": 1.0,
+          "coverage": 1.0,
+          "evidence_collapse_accuracy": 1.0,
+          "false_success_rate": 0.0,
+          "replicated_discovery_precision": 1.0,
+          "replicated_discovery_recall": 1.0,
+          "unsupported_commitment_rate": 0.0
+        },
+        "task_scores": {
+          "alternate_proof_survives": 1.0,
+          "and_proof_collapse": 1.0,
+          "authoritative_correction": 0.6666666666666666,
+          "holdout_without_replication": 1.0,
+          "independent_replication_firewall": 1.0,
+          "missing_artifact_is_failure": 1.0,
+          "model_repetition_is_not_evidence": 1.0,
+          "nonzero_exit_is_failure": 1.0,
+          "single_unverified_source": 1.0,
+          "temporal_scope_is_not_contradiction": 1.0
+        }
+      },
+      "audit_time": {
+        "completed_tasks": 0,
+        "total_seconds": 0,
+        "median_seconds": null
+      },
+      "integrity_valid": true
+    }
+  ],
+  "paired_bootstrap": [
+    {
+      "left_run_id": "evr_d9eb91f5f4c74729",
+      "right_run_id": "evr_d0959a34cd6f45eb",
+      "left_system": "Orbita deterministic adjudicator",
+      "right_system": "gpt-5.6-sol \u2014 direct",
+      "tasks": 10,
+      "mean_task_score_difference": 0.03333333333333334,
+      "bootstrap_95_ci": [
+        0.0,
+        0.1
+      ],
+      "direction": "left_better"
+    }
+  ],
+  "generated_at": "2026-07-26T08:49:35.078502+00:00"
+}

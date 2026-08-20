@@ -1,6 +1,78 @@
 # Changelog
 
+## 0.10.0 - 2026-08-19
+
+- Bound the verified Orbita Language Limit Lean kernel `0.2.0-rc1` into the case/provenance/claim lifecycle.
+- Added Orbita-discovered witness freezing over exact `X`, `phi`, `O`, rational arithmetic, finite scope, and provenance.
+- Added deterministic frozen-JSON-to-Lean translation plus trusted-checker receipts bound to the JSON, generated source,
+  theorem kernel, Lean/Mathlib versions, and build result.
+- Persisted `LEAN_VERIFIED_FINITE` and `LEAN_REJECTED` results on the originating case/claim without universal promotion.
+- Added MCP and Guided discover, freeze, verify, retrieve, and case-list surfaces.
+- Added frozen missing-primitive discovery and a one-shot prospective test of `Delta_L1(O) < Delta_L0(O)`.
+- Added fail-closed tests for certificate mutation, provenance mutation, altered audits, repeated prospective evaluation,
+  missing collision witnesses, LLM prose exclusion, and finite-to-universal scope escalation.
+
+## 0.9.0 - 2026-08-14
+
+- Added append-only normalized evidence receipts with exact source, scope, result, evaluator, independence, provenance,
+  normalization, and receipt hashes.
+- Added source-aware adapters for completed discovery runs, frozen evaluated Discovery Genome entries, and succeeded
+  integrity-verified external experiments.
+- Added a fixed decision-eligibility policy. Evidence can support bounded review categories but can never authorize
+  semantic admission/activation, policy promotion, code deployment, or architecture activation.
+- Added MCP and Guided read/normalization surfaces, tenant isolation, idempotent exact-source handling, immutable storage,
+  and adversarial hash/independence/authority tests.
+
+## 0.8.0 - 2026-08-14
+
+- Added a unified candidate execution registry with immutable, hash-bound executor contracts.
+- Bound compatible executor identity, implementation, verifier, input artifact, and protocol into every executable plan
+  before human approval.
+- Replaced candidate-kind fallback routing with exact contract dispatch for statistical tables, prospective blind
+  calibration, and structured research operators.
+- Added a governed research-operator adapter that freezes an external experiment without submitting, approving,
+  executing, verifying, or committing a scientific claim.
+- Added typed pre-approval `ENGINE_CAPABILITY_LIMIT` failures for ungrounded, mixed, or unsupported candidate kinds.
+- Added append-only candidate execution receipts and exposed registry/receipt reads through MCP and Guided.
+
+## 0.7.0 - 2026-08-14
+
+- Added a tenant-scoped, append-only General Problem Loop for arbitrary bounded objectives.
+- Enforced the `GOAL -> REPRESENT -> PLAN -> ACT -> OBSERVE -> FALSIFY -> DIAGNOSE -> REPAIR/LEARN -> RETRY ->
+  COMMIT/REFUSE` lifecycle with deterministic branching and frozen retry budgets.
+- Added artifact schemas, exact previous-event hashes, hash-chain verification, language-limit certificate requirements,
+  action-receipt requirements, and fail-closed self-activation rejection.
+- Exposed safe create/read/advance/verify operations through MCP, the Guided internal API, and Guided hybrid chat.
+
+
+## 0.6.0 - 2026-08-14
+
+- Added canonical, inert Language Snapshots covering primitives, observables, epistemic boundaries, permissions, and
+  invariants.
+- Added finite representation collision and nuisance-overseparation audits plus machine-checkable language-limit
+  certificates.
+- Added hash-bound repair candidates and exact-authorization transition receipts that cannot activate the runtime.
+- Added a fixed-parameter Temporal Unaskability audit comparing ordinary memory baselines, hysteresis, and State-Inertia.
+- Added typed capability-component graphs for conservative archive synthesis.
+- Added seven adversarial semantic-evolution tests and exposed the new operations through read-only MCP tools.
+
 ## Unreleased
+
+## 0.5.0 — 2026-08-13
+
+- Added provider-neutral `prospective_blind_calibration` as a separate governed execution route.
+- Added sanitized row batches, strict output vocabularies, forbidden-output validation, and one prediction per event.
+- Added immutable SHA-256 prediction freezes before any scoring-key intake is possible.
+- Added a separate tenant-scoped sealed-key store, exact-hash reveal approval, and immutable score receipts.
+- Added primary-label accuracy, confidence calibration error, and optional hypothesis-hit scoring.
+- Exposed the complete workflow through both MCP tools and Guided HTTP routes.
+- Added UAP-shaped leakage, holdout, row-materialization, vocabulary, and ten-row acceptance tests.
+
+## 0.4.0 — 2026-08-13
+
+- Unified MCP and Guided workflows over one tenant-scoped core.
+- Added generalized inactive improvement candidates and deterministic external experiments.
+- Added explicit evidence status, claim scope, falsification coverage, coverage repair, and re-examination propagation.
 
 - Replaced the single-principal Discovery Genome collapse with per-request tenant resolution from the authenticated
   OAuth subject. `ORBITA_DISCOVERY_GENOME_USERNAME` is no longer a deployment-wide tenant.

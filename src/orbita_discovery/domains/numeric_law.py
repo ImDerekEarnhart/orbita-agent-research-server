@@ -28,7 +28,7 @@ def _lstsq(X: list[list[float]], y: list[float]) -> list[float]:
     """Solve least squares via normal equations + Gaussian elimination (ridge-stabilized)."""
     k = len(X[0])
     A = [[0.0] * (k + 1) for _ in range(k)]
-    for row, yi in zip(X, y):
+    for row, yi in zip(X, y, strict=False):
         for i in range(k):
             A[i][k] += row[i] * yi
             for j in range(k):
@@ -55,7 +55,7 @@ def _r2(y: list[float], yhat: list[float]) -> float:
         return 0.0
     mean = sum(y) / n
     ss_tot = sum((v - mean) ** 2 for v in y)
-    ss_res = sum((v - h) ** 2 for v, h in zip(y, yhat))
+    ss_res = sum((v - h) ** 2 for v, h in zip(y, yhat, strict=False))
     if ss_tot <= 1e-12:
         return 0.0
     return 1.0 - ss_res / ss_tot
@@ -80,7 +80,7 @@ def _fit(kind: str, xs: list[float], ys: list[float]) -> dict | None:
             X = _features(kind, xs)
             return {"kind": kind, "beta": _lstsq(X, ys)}
         if kind == "power":                          # y = a * x^b  -> ln y = ln a + b ln x
-            if any(x <= 0 or v <= 0 for x, v in zip(xs, ys)):
+            if any(x <= 0 or v <= 0 for x, v in zip(xs, ys, strict=False)):
                 return None
             X = [[1.0, math.log(x)] for x in xs]
             beta = _lstsq(X, [math.log(v) for v in ys])
@@ -170,7 +170,8 @@ class NumericLawDomain:
         random.Random(seed).shuffle(idx)
         cut = int(0.7 * len(idx))
         tr, te = idx[:cut], idx[cut:]
-        pick = lambda I: {"xs": [evidence["xs"][i] for i in I], "ys": [evidence["ys"][i] for i in I]}
+        def pick(indices):
+            return {"xs": [evidence["xs"][i] for i in indices], "ys": [evidence["ys"][i] for i in indices]}
         return pick(tr), pick(te)
 
     def refit(self, c: Candidate, train) -> Any:

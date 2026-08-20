@@ -18,9 +18,10 @@ timestamps needed to point back at its exact source in the export.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Iterable
+from datetime import UTC, datetime
+from typing import Any
 
 import pandas as pd
 
@@ -49,7 +50,7 @@ class Message:
         if self.create_time is None:
             return None
         try:
-            return datetime.fromtimestamp(self.create_time, tz=timezone.utc).isoformat()
+            return datetime.fromtimestamp(self.create_time, tz=UTC).isoformat()
         except (OverflowError, OSError, ValueError):
             return None
 
@@ -247,7 +248,7 @@ def messages_to_frame(messages: Iterable[Message]) -> pd.DataFrame:
 
 def parse_export_file(path) -> tuple[pd.DataFrame, ExportSummary]:
     """Read a `conversations.json` file from disk into a frame plus its summary."""
-    with open(path, "r", encoding="utf-8") as handle:
+    with open(path, encoding="utf-8") as handle:
         payload = json.load(handle)
     messages, summary = parse_conversations(payload)
     return messages_to_frame(messages), summary

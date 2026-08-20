@@ -8,7 +8,7 @@ import sqlite3
 import statistics
 import zipfile
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from statistics import NormalDist
 from typing import Any
@@ -21,7 +21,7 @@ REVIEW_LABELS = {"pass", "fail", "uncertain"}
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _stable_json(value: Any) -> str:
@@ -80,7 +80,7 @@ class StudyArmSpec:
             raise ValueError("max_cost_usd_per_run cannot be negative")
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "StudyArmSpec":
+    def from_dict(cls, value: dict[str, Any]) -> StudyArmSpec:
         return cls(
             key=str(value["key"]),
             name=str(value["name"]),
@@ -149,7 +149,7 @@ class EmpiricalStudySpec:
         object.__setattr__(self, "hypotheses", tuple(str(x) for x in self.hypotheses))
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "EmpiricalStudySpec":
+    def from_dict(cls, value: dict[str, Any]) -> EmpiricalStudySpec:
         return cls(
             title=str(value["title"]),
             suite_id=str(value["suite_id"]),

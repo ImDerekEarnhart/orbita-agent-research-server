@@ -109,10 +109,12 @@ class ReportCompiler:
                 f"### {idx}. {candidate.get('statement', candidate.get('id'))}",
                 "",
                 f"- **Final status:** {finding.get('final_status')}",
+                f"- **Evidence status:** {finding.get('evidence_status', 'PROVISIONAL')}",
                 f"- **Held-out score:** {_fmt(verdict.get('score'))}",
                 f"- **Baseline:** {_fmt(verdict.get('detail', {}).get('baseline'))}",
                 f"- **Checks survived:** {', '.join(finding.get('survived', [])) or 'none'}",
                 f"- **Candidate type:** {candidate.get('payload', {}).get('kind', 'unspecified')}",
+                f"- **Claim scope:** {_fmt(finding.get('claim_scope', {}).get('quantifier'))} within {_fmt(finding.get('claim_scope', {}).get('domain'))}",
             ]
             for attack in finding.get("falsifications", []):
                 lines.append(
@@ -121,6 +123,12 @@ class ReportCompiler:
                 )
             lines += [
                 "- **Interpretation:** This relation remained predictive or structured in the locked confirmation checks used here. It does not establish causation.",
+                "- **Known untested regions:** "
+                + ", ".join(
+                    finding.get("falsification_coverage", {}).get(
+                        "known_uncovered_regions", []
+                    )
+                ),
                 "- **Recommended next test:** Repeat the frozen candidate on an independent dataset; inspect subgroup consistency, outliers, measurement construction, and plausible confounders.",
                 "",
             ]
@@ -132,7 +140,8 @@ class ReportCompiler:
             killed_by = [a.get("name") for a in finding.get("falsifications", []) if a.get("killed")]
             lines.append(
                 f"- **{finding.get('candidate', {}).get('statement', finding.get('candidate', {}).get('id'))}** — "
-                f"status `{finding.get('final_status')}`, score {_fmt(finding.get('verdict', {}).get('score'))}; "
+                f"status `{finding.get('final_status')}`, evidence `{finding.get('evidence_status', 'UNRESOLVED')}`, "
+                f"score {_fmt(finding.get('verdict', {}).get('score'))}; "
                 f"failed: {', '.join(killed_by) or 'did not reach the governed threshold'}."
             )
 
@@ -170,6 +179,8 @@ class ReportCompiler:
             "- Rows were treated as independent unless the analysis plan states otherwise.",
             "- Source documents are preserved as provenance and context in v0.1; they do not silently override the dataset.",
             "- A surviving association should be interpreted in the researcher’s domain before any mechanistic or practical claim is made.",
+            "- Execution receipts establish what ran; they do not upgrade empirical evidence into mathematical proof.",
+            "- A universal claim is rejected unless its evidence explicitly covers the same universal scope.",
             "",
             "## Highest-value next tests",
             "",
@@ -191,8 +202,9 @@ class ReportCompiler:
             lines.append("| Claim ID | Status | Finding type | Statement |")
             lines.append("|---|---|---|---|")
             for row in claim_rows:
+                escaped_text = row["canonical_text"].replace("|", "\\|")
                 lines.append(
-                    f"| `{row['claim_id']}` | {row['status']} | {row['finding_type']} | {row['canonical_text'].replace('|', '\\|')} |"
+                    f"| `{row['claim_id']}` | {row['status']} | {row['finding_type']} | {escaped_text} |"
                 )
         if reexamination:
             lines += ["", "### Re-examination queue", ""]

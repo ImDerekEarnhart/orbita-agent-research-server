@@ -1,0 +1,25 @@
+{
+  "suite_id": "evs_0fe63d8ab4b2463b",
+  "suite_hash": "300cf97d3217c735d2782092a5be16086b08e275216404c568d29835347c9691",
+  "report_hash": "5a33c20e25561f097c30e3ccfdeb7a576bdae1f359b98f390902ace93ef31153",
+  "control": {
+    "source": "C:\\Users\\Dereks\\projects\\orbita-agent-research-server\\benchmarks\\adversarial-epistemic-v1\\mcp-release-candidate\\openai-gpt-5.6-sol-direct.response.json",
+    "run_id": "evr_d0959a34cd6f45eb",
+    "response_hash": "607d33058fb8a101b3217d658039e5309f9e482d285a2587f4ca7951cd373ffe"
+  },
+  "orbita": {
+    "run_id": "evr_d9eb91f5f4c74729",
+    "response_hash": "45601dc9cd978f6655ee578320f6e9d004a50eb0efa72db1e9d960f9eeeaebe7",
+    "model_calls": 0,
+    "network_calls": 0
+  },
+  "verification": {
+    "suite": true,
+    "runs": {
+      "evr_d0959a34cd6f45eb": true,
+      "evr_d9eb91f5f4c74729": true
+    },
+    "report": true
+  },
+  "interpretation_boundary": "Zero-token comparison using saved GPT-5.6 responses and fresh deterministic Orbita adjudications over the same public tasks. This reuses the control and is not a fresh model run."
+}

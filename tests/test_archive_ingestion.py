@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -77,6 +78,33 @@ def test_member_parsing_is_capped(tmp_path):
     )
 
 
+def test_archive_budget_prioritizes_research_logic_before_bulk_tables(tmp_path):
+    source = _zip(
+        tmp_path,
+        "programme.zip",
+        {
+            "bulk.csv": "a\n" + "1\n" * 5_000,
+            "method.py": "# frozen method\nprint('audit')\n",
+        },
+    )
+    result = ArtifactIngestor(max_members_parsed=1).ingest(source, tmp_path / "out")
+
+    by_name = {member["name"]: member for member in result["profile"]["members"]}
+    assert by_name["method.py"]["artifact_kind"] == "text"
+    assert by_name["bulk.csv"]["parse_status"] == "skipped"
+
+
+def test_long_inherited_paths_are_flattened_but_preserved_in_the_manifest(tmp_path):
+    long_name = "/".join(["very_long_research_stage"] * 20) + "/method.py"
+    source = _zip(tmp_path, "long.zip", {long_name: "print('preserved')\n"})
+    result = ArtifactIngestor().ingest(source, tmp_path / "out")
+
+    member = result["profile"]["members"][0]
+    assert member["name"] == long_name
+    assert Path(member["extracted_path"]).is_file()
+    assert len(Path(member["extracted_path"]).name) < 120
+
+
 def test_an_oversized_member_is_skipped_rather_than_parsed(tmp_path):
     source = _zip(tmp_path, "big.zip", {"big.csv": "a\n" + "1\n" * 5_000, "small.csv": "a\n1\n"})
     result = ArtifactIngestor(max_member_bytes=1_000).ingest(source, tmp_path / "out")
@@ -101,13 +129,16 @@ def test_one_unparseable_member_does_not_fail_the_archive(tmp_path):
     assert by_name["broken.json"]["error"]
 
 
-def test_the_unpacked_size_guard_still_refuses_a_bomb(tmp_path):
+def test_the_working_set_guard_inventories_but_never_inflates_a_bomb(tmp_path):
     source = _zip(tmp_path, "bomb.zip", {"huge.txt": "x" * 200_000})
     result = ArtifactIngestor(max_unpacked_bytes=1_000).ingest(source, tmp_path / "out")
 
-    # The guard raises inside ingest, which records it rather than crashing the upload.
-    assert result["parse_status"] in {"failed", "partially_parsed"}
-    assert "safe unpacked-size limit" in result["error"]
+    assert result["artifact_kind"] == "archive"
+    assert result["profile"]["declared_unpacked_bytes"] == 200_000
+    assert result["profile"]["extracted_working_set_bytes"] == 0
+    assert result["profile"]["parsed_member_count"] == 0
+    assert "working-set budget" in result["profile"]["members"][0]["skip_reason"]
+    assert Path(result["profile"]["manifest_path"]).is_file()
 
 
 def test_zip_slip_is_still_refused(tmp_path):

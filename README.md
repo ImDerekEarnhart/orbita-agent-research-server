@@ -1,4 +1,4 @@
-# Orbita Agent Research Server v0.4.0
+# Orbita Agent Research Server v0.5.0
 
 Orbita Agent Research Server is a local, MCP-native research system for people and AI agents. It turns supplied data into an explicit analysis plan, freezes that plan before confirmation scoring, runs bounded falsification checks, and stores both survivors and failures in persistent epistemic memory.
 
@@ -99,6 +99,13 @@ Existing single-owner deployments keep working with no variable changes. When ex
 disengages as soon as a second GitHub user is allowed, at which point explicit bindings become mandatory and the
 server refuses to start without them.
 
+## Normalized evidence
+
+Orbita 0.9 records route-specific evidence in a shared append-only receipt format without rewriting the original source.
+Eligibility is derived from a fixed source policy: a Genome tournament may support discovery-operator review, for example,
+but no evidence receipt can authorize admission, activation, promotion, architecture changes, or deployment. See
+`docs/EVIDENCE_NORMALIZATION.md`.
+
 ## Install
 
 Python 3.11 or newer is required.
@@ -179,6 +186,37 @@ route, OAuth discovery/registration/token/revocation routes, and protected `/mcp
 
 ## Governed self-improvement
 
+### Governed semantic evolution
+
+Orbita can now represent a finite executable language as an immutable `LanguageSnapshot`, partition explicit worlds
+by what that language can observe, identify exact outcome-changing collisions and nuisance overseparation, and issue a
+hash-bound `LanguageLimitCertificate`. A proposed repair must name one declarative primitive plus prospective recovery,
+unchanged-control, and new-failure predictions. Only a prospectively survived, exact-hash evaluation plus the exact
+human transition phrase can materialize the next snapshot.
+
+Materialization deliberately creates an **inert** `L(t+1)` snapshot and transition receipt. It does not execute proposed
+semantics, edit source code, deploy, or modify the active Orbita runtime. This keeps language diagnosis, candidate
+generation, evaluation, authorization, and runtime activation as separate authorities.
+
+The companion capability-component graph converts archived ideas into typed inputs, outputs, capabilities, needs,
+failure modes, assumptions, and falsifiers. Its edges assert interface matches only—not scientific validity or successful
+composition.
+
+### General Problem Loop
+
+Orbita can freeze an arbitrary objective into an append-only state machine covering representation, planning, executor
+receipts, observation, falsification, diagnosis, inactive repair/learning proposals, bounded retries, and evidence-bound
+commit or refusal. The attached model supplies proposals; Orbita validates each stage and controls every transition.
+See [docs/GENERAL_PROBLEM_LOOP.md](docs/GENERAL_PROBLEM_LOOP.md).
+
+### Unified candidate execution
+
+Every executable plan is now bound, before approval, to an exact installed executor contract. Candidate kinds are never
+silently coerced into the legacy table scorer. Statistical relationships, prospective blind calibration, and structured
+research operators resolve through separate hash-bound adapters; unsupported or incompletely grounded kinds stop with a
+typed `ENGINE_CAPABILITY_LIMIT`. Successful dispatch emits an append-only receipt. See
+[docs/UNIFIED_CANDIDATE_EXECUTION.md](docs/UNIFIED_CANDIDATE_EXECUTION.md).
+
 Orbita can learn from completed cases without rewriting its own code. The improvement lab can change only a small
 allowlist of research-policy values: candidate budget, scout split, deterministic seed, judge thresholds, and
 cross-seed falsification settings.
@@ -192,6 +230,70 @@ cross-seed falsification settings.
    exact confirmation phrase.
 5. `orbita_rollback_improvement` can restore a previously active policy through another hash-bound approval.
 
+The generalized governed registry is a separate, inactive lane. It can register policy, code, operator, verifier,
+language, retrieval, UI, performance, and safety candidates; freeze their evaluation contracts; and record one
+hash-bound result. It has no generalized promotion, merge, or deployment tool.
+
+## Deterministic external experiments
+
+Questions that do not fit Orbita's built-in table scorer can be preserved and routed through a frozen external
+experiment instead of being silently translated into a different statistical question. The Agent/MCP v1 route:
+
+1. requires an already approved Orbita plan and its exact hash;
+2. freezes claim scope, coverage (including untested regions), inline code/data, outputs, verifier, and anti-rescue rules;
+3. stages a digest-pinned, network-disabled, non-root execution manifest;
+4. requires separate human approval bound to both experiment and manifest hashes;
+5. records output and execution-receipt hashes; and
+6. stores independent verification separately from execution integrity.
+
+A successful run remains epistemically `UNVERIFIED` until a verifier receipt is recorded. Even then, support is
+reported as `EMPIRICAL_SURVIVOR`, not universal proof. The v1 MCP surface accepts inline text artifacts only and
+rejects arbitrary server file paths.
+
+Successful executions can be replayed from their exact staged artifacts. The replay receives a new manifest and a
+separate exact-hash human approval. Matching output hashes establish bitwise technical reproduction only; Orbita
+explicitly reports that scientific reproduction is not established by same-protocol replay.
+
+If a missed, independently receipt-backed counterexample exposes a coverage bug, Orbita preserves the original
+experiment, changes its epistemic status to `REFUTED` or `CHALLENGED` as declared by the validated effect, creates a
+hash-bound replacement protocol version, and marks reevaluation required. It never edits the old protocol in place.
+
+The replacement protocol can then be frozen as a new deterministic execution. Every affected result must be declared
+before approval. After execution, the bug remains open until every declared result receives exactly one disposition
+(`refuted`, `challenged`, `unchanged`, or `superseded`) tied to the exact replacement execution receipt.
+
+Guided discovery findings also carry a separate epistemic contract: an explicit evidence status, normalized claim
+scope, falsification coverage, and known untested regions. `supported` translates to `EMPIRICAL_SURVIVOR`, never
+`FORMALLY_PROVED`. The read-only `orbita_guard_claim_scope` MCP tool rejects attempts to turn sample or bounded
+evidence into a broader universal claim. Epistemic events are append-only and appear in reconstructed claim history.
+Validated external coverage bugs may name affected Guided claim IDs. Orbita then preserves immutable claim bindings,
+appends a downgraded evidence state, and opens re-examination work for those claims and their dependents. The
+`orbita_propagate_external_coverage_bug_to_claims` tool safely retries this cross-database projection without creating
+duplicate history.
+
+## Prospective blind calibration
+
+Plans containing exactly one `prospective_blind_calibration` candidate use a separate prediction-before-reveal
+workflow instead of the ordinary association scorer. The plan freezes the sanitized blind input, visible fields,
+allowed hypotheses, epistemic labels, evidence classes, forbidden outputs, prediction-provider policy, and scoring
+schema. The prediction provider can be an LLM, another model, a deterministic ruleset, or a human process, but its
+identity is stored in the immutable prediction receipt.
+
+The workflow enforces this order:
+
+1. prepare the protocol from an exact approved plan and a sanitized row-level input;
+2. expose only the visible rows and frozen output vocabulary;
+3. validate and freeze exactly one prediction per row with a SHA-256 receipt;
+4. accept a separate scoring key only after prediction freeze;
+5. require exact protocol, prediction, and scoring-key hashes plus explicit reveal approval; and
+6. score the immutable predictions, preserving row-level accuracy, hypothesis hits, and calibration error.
+
+Declared scoring-key or unresolved-holdout fields are rejected if they occur in the blind input. Scoring-key contents
+live in a separate tenant-scoped database and are never returned by the prediction batch or ordinary status tools.
+This protocol is domain-neutral: UAP event calibration, medical cases, materials failure, hardware faults, biology,
+and AI-safety labels use the same governed machinery. See
+[`docs/PROSPECTIVE_BLIND_CALIBRATION.md`](docs/PROSPECTIVE_BLIND_CALIBRATION.md).
+
 The lab cannot edit source, invoke a shell, deploy, or activate its own proposal. New plans record the active policy
 ID, version, hash, and whether the caller overrode the candidate budget.
 
@@ -204,6 +306,8 @@ The exact approval phrase is reported by `orbita_capabilities`; clients should n
 - Vault: full-text curated research search and structured claim cards.
 - Graph theory: preserved finite-run summaries, near misses, bounded graph analysis, and Lean witness export.
 - Improvement: history-derived proposals, deterministic benchmark replay, policy activation, and rollback.
+- External experiments: scope-preserving deterministic execution with exact approval and independent verification.
+- Blind calibration: sanitized prediction batches, immutable prediction freezes, sealed gold keys, and approved reveal.
 
 ## Scientific boundaries
 

@@ -3,14 +3,26 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Iterable
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from typing import Any
 
-from orbita import ActorRole, ClaimStatus, EpistemicLedger, EvidenceKind, Stance, SupportEngine
+from orbita import (
+    ActorRole,
+    ClaimStatus,
+    EpistemicLedger,
+    EvidenceKind,
+    EvidenceStatus,
+    Stance,
+    SupportEngine,
+    normalize_claim_scope,
+    normalize_falsification_coverage,
+    warranted_status,
+)
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _new_id(prefix: str) -> str:
@@ -70,10 +82,54 @@ CREATE TABLE IF NOT EXISTS reexamination_queue (
     UNIQUE(claim_id, trigger_type, trigger_id, status)
 );
 
+CREATE TABLE IF NOT EXISTS claim_epistemic_events (
+    id TEXT PRIMARY KEY,
+    claim_id TEXT NOT NULL REFERENCES claims(id),
+    evidence_status TEXT NOT NULL,
+    claim_scope_json TEXT NOT NULL,
+    falsification_coverage_json TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    source_run_id TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS claim_coverage_bug_impacts (
+    id TEXT PRIMARY KEY,
+    coverage_bug_id TEXT NOT NULL,
+    claim_id TEXT NOT NULL REFERENCES claims(id),
+    replacement_protocol_hash TEXT NOT NULL,
+    claim_effect TEXT NOT NULL,
+    missed_counterexample_json TEXT NOT NULL,
+    replacement_coverage_json TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(coverage_bug_id, claim_id)
+);
+
+CREATE TRIGGER IF NOT EXISTS claim_epistemic_events_no_update
+BEFORE UPDATE ON claim_epistemic_events
+BEGIN SELECT RAISE(ABORT, 'claim epistemic events are immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS claim_epistemic_events_no_delete
+BEFORE DELETE ON claim_epistemic_events
+BEGIN SELECT RAISE(ABORT, 'claim epistemic events are immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS claim_coverage_bug_impacts_no_update
+BEFORE UPDATE ON claim_coverage_bug_impacts
+BEGIN SELECT RAISE(ABORT, 'claim coverage bug impacts are immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS claim_coverage_bug_impacts_no_delete
+BEFORE DELETE ON claim_coverage_bug_impacts
+BEGIN SELECT RAISE(ABORT, 'claim coverage bug impacts are append-only'); END;
+
 CREATE INDEX IF NOT EXISTS idx_supersessions_old ON claim_supersessions(older_claim_id, active);
 CREATE INDEX IF NOT EXISTS idx_supersessions_new ON claim_supersessions(newer_claim_id, active);
 CREATE INDEX IF NOT EXISTS idx_claim_checks_claim ON claim_checks(claim_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_reexam_status ON reexamination_queue(status, priority, created_at);
+CREATE INDEX IF NOT EXISTS idx_claim_epistemic_events_claim
+ON claim_epistemic_events(claim_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_claim_coverage_bug_impacts_claim
+ON claim_coverage_bug_impacts(claim_id, created_at, id);
 """
 
 
@@ -235,6 +291,242 @@ class BeliefMemory:
                 actor_role=ActorRole.POLICY,
             )
         return SupportEngine(self.ledger).evaluate(claim_id).state.value
+
+    def record_epistemic_contract(
+        self,
+        claim_id: str,
+        *,
+        evidence_status: EvidenceStatus | str,
+        claim_scope: dict[str, Any] | None,
+        falsification_coverage: dict[str, Any] | None,
+        reason: str,
+        source_run_id: str | None = None,
+        actor: str = "epistemic-policy",
+    ) -> dict[str, Any]:
+        """Append the warranted evidence state without rewriting claim history."""
+
+        self.ledger._require_claim(claim_id)
+        status = warranted_status(
+            evidence_status,
+            claim_scope=claim_scope,
+            coverage=falsification_coverage,
+        )
+        scope = normalize_claim_scope(claim_scope)
+        coverage = normalize_falsification_coverage(falsification_coverage)
+        event_id = _new_id("epi")
+        created_at = _utcnow()
+        self.ledger.db.conn.execute(
+            """INSERT INTO claim_epistemic_events
+               (id, claim_id, evidence_status, claim_scope_json,
+                falsification_coverage_json, reason, source_run_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                event_id,
+                claim_id,
+                status.value,
+                _stable_json(scope),
+                _stable_json(coverage),
+                reason,
+                source_run_id,
+                created_at,
+            ),
+        )
+        payload = {
+            "event_id": event_id,
+            "evidence_status": status.value,
+            "claim_scope": scope,
+            "falsification_coverage": coverage,
+            "reason": reason,
+            "source_run_id": source_run_id,
+        }
+        self.ledger._event(
+            "claim", claim_id, "EPISTEMIC_CONTRACT_RECORDED", payload, actor, ActorRole.POLICY
+        )
+        self.ledger.db.conn.commit()
+        return {**payload, "claim_id": claim_id, "created_at": created_at}
+
+    def epistemic_history(self, claim_id: str) -> list[dict[str, Any]]:
+        self.ledger._require_claim(claim_id)
+        rows = self.ledger.db.conn.execute(
+            """SELECT * FROM claim_epistemic_events
+               WHERE claim_id = ? ORDER BY created_at, id""",
+            (claim_id,),
+        ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item["claim_scope"] = json.loads(item.pop("claim_scope_json"))
+            item["falsification_coverage"] = json.loads(
+                item.pop("falsification_coverage_json")
+            )
+            result.append(item)
+        return result
+
+    def record_coverage_bug_impact(
+        self,
+        claim_id: str,
+        *,
+        coverage_bug_id: str,
+        replacement_protocol_hash: str,
+        claim_effect: str,
+        missed_counterexample: dict[str, Any],
+        replacement_coverage: dict[str, Any],
+        reason: str,
+        actor: str = "coverage-bug-bridge",
+    ) -> dict[str, Any]:
+        """Challenge a historical claim and queue its dependency blast radius.
+
+        The old claim and prior evidence events remain untouched. Repeating the
+        same bridge call is safe and returns the original immutable link.
+        """
+
+        self.ledger._require_claim(claim_id)
+        if claim_effect not in {"refutes_claim", "challenges_coverage"}:
+            raise ValueError("claim_effect must be refutes_claim or challenges_coverage")
+        existing = self.ledger.db.conn.execute(
+            """SELECT id FROM claim_coverage_bug_impacts
+               WHERE coverage_bug_id = ? AND claim_id = ?""",
+            (coverage_bug_id, claim_id),
+        ).fetchone()
+        if existing is not None:
+            return self._coverage_bug_impact(existing["id"])
+
+        history = self.epistemic_history(claim_id)
+        claim = self.ledger.get_claim(claim_id)
+        previous = history[-1] if history else None
+        scope = normalize_claim_scope(
+            previous["claim_scope"] if previous is not None else claim.get("scope", {})
+        )
+        coverage = normalize_falsification_coverage(
+            previous["falsification_coverage"] if previous is not None else {}
+        )
+        known_failure = {
+            "coverage_bug_id": coverage_bug_id,
+            "replacement_protocol_hash": replacement_protocol_hash,
+            "missed_counterexample": missed_counterexample,
+        }
+        if known_failure not in coverage["known_failures"]:
+            coverage["known_failures"].append(known_failure)
+        gap = f"validated coverage gap recorded by {coverage_bug_id}"
+        if gap not in coverage["known_uncovered_regions"]:
+            coverage["known_uncovered_regions"].append(gap)
+
+        evidence_status = (
+            EvidenceStatus.REFUTED
+            if claim_effect == "refutes_claim"
+            else EvidenceStatus.PROVISIONAL
+        )
+        claim_status = (
+            ClaimStatus.REJECTED
+            if claim_effect == "refutes_claim"
+            else ClaimStatus.CHALLENGED
+        )
+        impact = (
+            "refuted_by_validated_counterexample"
+            if claim_effect == "refutes_claim"
+            else "coverage_challenged"
+        )
+        link_id = _new_id("cbi")
+        epistemic_event_id = _new_id("epi")
+        created_at = _utcnow()
+        support = SupportEngine(self.ledger).evaluate(claim_id).as_dict()
+        descendants = self.ledger.descendants_of_claim(claim_id)
+        try:
+            self.ledger.db.conn.execute(
+                """INSERT INTO claim_coverage_bug_impacts
+                   (id, coverage_bug_id, claim_id, replacement_protocol_hash,
+                    claim_effect, missed_counterexample_json, replacement_coverage_json,
+                    reason, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    link_id,
+                    coverage_bug_id,
+                    claim_id,
+                    replacement_protocol_hash,
+                    claim_effect,
+                    _stable_json(missed_counterexample),
+                    _stable_json(normalize_falsification_coverage(replacement_coverage)),
+                    reason,
+                    created_at,
+                ),
+            )
+            self.ledger.db.conn.execute(
+                """INSERT INTO claim_epistemic_events
+                   (id, claim_id, evidence_status, claim_scope_json,
+                    falsification_coverage_json, reason, source_run_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    epistemic_event_id,
+                    claim_id,
+                    evidence_status.value,
+                    _stable_json(scope),
+                    _stable_json(coverage),
+                    reason,
+                    f"coverage_bug:{coverage_bug_id}",
+                    created_at,
+                ),
+            )
+            self.ledger.db.conn.execute(
+                "UPDATE claims SET status = ?, updated_at = ? WHERE id = ?",
+                (claim_status.value, created_at, claim_id),
+            )
+            self.ledger._event(
+                "claim",
+                claim_id,
+                "EXTERNAL_COVERAGE_BUG_LINKED",
+                {
+                    "coverage_bug_id": coverage_bug_id,
+                    "coverage_bug_impact_id": link_id,
+                    "replacement_protocol_hash": replacement_protocol_hash,
+                    "claim_effect": claim_effect,
+                    "evidence_status": evidence_status.value,
+                    "reason": reason,
+                },
+                actor,
+                ActorRole.POLICY,
+            )
+            self._enqueue(
+                claim_id,
+                trigger_type="external_coverage_bug",
+                trigger_id=coverage_bug_id,
+                impact=impact,
+                reason=reason,
+                remaining_support=support,
+            )
+            for descendant_id in descendants:
+                self._enqueue(
+                    descendant_id,
+                    trigger_type="external_coverage_bug_dependency",
+                    trigger_id=coverage_bug_id,
+                    impact=f"depends_on_{impact}",
+                    reason=f"Dependency on {claim_id}: {reason}",
+                    remaining_support=SupportEngine(self.ledger).evaluate(descendant_id).as_dict(),
+                )
+            self.ledger.db.conn.commit()
+        except Exception:
+            self.ledger.db.conn.rollback()
+            raise
+        return self._coverage_bug_impact(link_id)
+
+    def coverage_bug_impacts(self, claim_id: str) -> list[dict[str, Any]]:
+        self.ledger._require_claim(claim_id)
+        rows = self.ledger.db.conn.execute(
+            """SELECT id FROM claim_coverage_bug_impacts
+               WHERE claim_id = ? ORDER BY created_at, id""",
+            (claim_id,),
+        ).fetchall()
+        return [self._coverage_bug_impact(row["id"]) for row in rows]
+
+    def _coverage_bug_impact(self, impact_id: str) -> dict[str, Any]:
+        row = self.ledger.db.conn.execute(
+            "SELECT * FROM claim_coverage_bug_impacts WHERE id = ?", (impact_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Unknown claim coverage bug impact: {impact_id}")
+        item = dict(row)
+        item["missed_counterexample"] = json.loads(item.pop("missed_counterexample_json"))
+        item["replacement_coverage"] = json.loads(item.pop("replacement_coverage_json"))
+        return item
 
     def add_evidence(
         self,
@@ -608,7 +900,15 @@ class BeliefMemory:
         remaining_support: dict[str, Any],
     ) -> str:
         queue_id = _new_id("rq")
-        priority = "high" if impact == "unsupported_must_reexamine" else "medium"
+        priority = (
+            "high"
+            if impact in {
+                "unsupported_must_reexamine",
+                "refuted_by_validated_counterexample",
+                "coverage_challenged",
+            }
+            else "medium"
+        )
         try:
             self.ledger.db.conn.execute(
                 """INSERT INTO reexamination_queue
@@ -716,11 +1016,20 @@ class BeliefMemory:
                 )
         timeline.sort(key=lambda item: (item["created_at"], item["claim_id"], item["event_type"]))
         current_id = chain[-1]["claim_id"]
+        epistemic_history = {cid: self.epistemic_history(cid) for cid in claim_ids}
+        current_epistemic = (
+            epistemic_history[current_id][-1] if epistemic_history[current_id] else None
+        )
         return {
             "requested_claim_id": claim_id,
             "current_claim_id": current_id,
             "current_claim": self.ledger.get_claim(current_id),
             "current_support": SupportEngine(self.ledger).evaluate(current_id).as_dict(),
+            "current_epistemic_contract": current_epistemic,
+            "epistemic_history": epistemic_history,
+            "coverage_bug_impacts": {
+                cid: self.coverage_bug_impacts(cid) for cid in claim_ids
+            },
             "supersession_chain": chain,
             "timeline": timeline,
             "evidence": {cid: self._evidence(cid) for cid in claim_ids},

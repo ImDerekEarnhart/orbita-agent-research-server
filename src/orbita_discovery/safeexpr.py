@@ -51,7 +51,7 @@ def _eval(node: ast.AST, env: dict[str, Any]) -> Any:
     if isinstance(node, ast.Tuple):
         return tuple(_eval(x, env) for x in node.elts)
     if isinstance(node, ast.Dict):
-        return {_eval(k, env): _eval(v, env) for k, v in zip(node.keys, node.values)}
+        return {_eval(k, env): _eval(v, env) for k, v in zip(node.keys, node.values, strict=False)}
     if isinstance(node, ast.BinOp) and type(node.op) in _BIN:
         return _BIN[type(node.op)](_eval(node.left, env), _eval(node.right, env))
     if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY:
@@ -61,7 +61,7 @@ def _eval(node: ast.AST, env: dict[str, Any]) -> Any:
         return all(values) if isinstance(node.op, ast.And) else any(values)
     if isinstance(node, ast.Compare):
         left = _eval(node.left, env)
-        for op_node, comp_node in zip(node.ops, node.comparators):
+        for op_node, comp_node in zip(node.ops, node.comparators, strict=False):
             right = _eval(comp_node, env)
             fn = _CMP.get(type(op_node))
             if fn is None or not fn(left, right):

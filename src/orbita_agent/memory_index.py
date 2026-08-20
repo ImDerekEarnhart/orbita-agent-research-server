@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import pandas as pd
 

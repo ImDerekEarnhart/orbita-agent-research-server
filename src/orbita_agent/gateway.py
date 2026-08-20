@@ -1,23 +1,46 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import shutil
 import threading
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from orbita import guard_scope_escalation
 from orbita_mvp import ResearchMVP
+from orbita_mvp.execution_dispatch import DEFAULT_EXECUTOR_REGISTRY
 
 from . import __version__
+from .arc3_control import run_synthetic_arc3_control, verify_receipt_chain
+from .arc3_official import freeze_comparison_protocol, verify_comparison_protocol
+from .archive_policy import ArchivePolicy
+from .blind_calibration import PREDICTION_KIND, BlindCalibrationService
+from .build_provenance import public_build_provenance
+from .candidate_execution import CandidateExecutionLedger
+from .candidate_execution import content_hash as candidate_result_hash
 from .config import AgentConfig
+from .evidence_normalization import (
+    EvidenceReceiptLedger,
+    discovery_run_receipt_input,
+    external_experiment_receipt_input,
+    genome_tournament_receipt_input,
+)
+from .external_experiments import ExternalExperimentService
+from .general_problem_loop import GeneralProblemLoopService
 from .graph_adapter import analyze_graph, export_lean_certificate
 from .improvement import PROMOTION_PHRASE, ROLLBACK_PHRASE, ImprovementLab
+from .improvement_registry import ImprovementRegistry
 from .knowledge import KnowledgeStore
-from .archive_policy import ArchivePolicy
+from .language_limit_verification import LanguageLimitVerificationService
 from .memory_index import MemoryIndex, chat_export_members
+from .object_store import build_object_store, object_key
+from .opportunity_diagnosis import audit_observation_only_instrument
 from .reversals import find_candidate_reversals
 
 APPROVAL_PHRASE = "I reviewed this exact frozen plan"
@@ -46,7 +69,24 @@ class AgentGateway:
         self.service = ResearchMVP(self.config.db_path, self.config.workspace)
         self.knowledge = KnowledgeStore(self.config.knowledge_db)
         self.improvements = ImprovementLab(self.config.improvement_db, self.service)
+        self.improvement_registry = ImprovementRegistry(self.config.improvement_db)
+        self.external_experiments = ExternalExperimentService(
+            self.config.external_experiment_db,
+            self.config.epistemic_db,
+            self.config.execution_workspace,
+            self.service,
+        )
+        self.blind_calibration = BlindCalibrationService(
+            self.config.blind_prediction_db,
+            self.config.blind_scoring_db,
+            self.service,
+        )
+        self.general_problem_loops = GeneralProblemLoopService(self.config.general_problem_loop_db)
+        self.candidate_executions = CandidateExecutionLedger(self.config.candidate_execution_db)
+        self.evidence_receipts = EvidenceReceiptLedger(self.config.evidence_receipt_db)
+        self.language_limits = LanguageLimitVerificationService(self.config, self.service)
         self.memory = MemoryIndex(self.config.memory_db)
+        self.objects = build_object_store(self.config.home / "objects")
         self._lock = threading.RLock()
         self._children: list[AgentGateway] = []
 
@@ -63,6 +103,12 @@ class AgentGateway:
         for child in children:
             child.close()
         self.memory.close()
+        self.candidate_executions.close()
+        self.evidence_receipts.close()
+        self.general_problem_loops.close()
+        self.blind_calibration.close()
+        self.external_experiments.close()
+        self.improvement_registry.close()
         self.improvements.close()
         self.knowledge.close()
         self.service.close()
@@ -74,6 +120,14 @@ class AgentGateway:
         self.close()
 
     def capabilities(self) -> dict[str, Any]:
+        try:
+            active_policy = self.improvements.active_policy()
+        except Exception as exc:  # capability discovery must remain available during partial outages
+            active_policy = {"status": "unavailable", "error_type": type(exc).__name__}
+        try:
+            knowledge = self.knowledge.status()
+        except Exception as exc:  # report a bounded diagnostic instead of breaking tool discovery
+            knowledge = {"status": "unavailable", "error_type": type(exc).__name__}
         return {
             "product": "Orbita Agent Research Server",
             "version": __version__,
@@ -82,6 +136,7 @@ class AgentGateway:
                 "discovery_engine": "0.2-compatible",
                 "research_mvp": "0.1-derived",
             },
+            "build_provenance": public_build_provenance(),
             "research_routes": [
                 "tabular intake and deterministic profiling",
                 "frozen scout/confirmation plans",
@@ -89,6 +144,17 @@ class AgentGateway:
                 "persistent claims, evidence, contradictions, and supersession",
                 "curated research-memory search",
                 "bounded graph analysis and Lean finite-certificate export",
+                "frozen deterministic external experiments with independent verification",
+                "prospective blind calibration with prediction-before-reveal scoring",
+                "hash-bound language snapshots, finite representation audits, and inert semantic transitions",
+                "case-bound representational-hole discovery, deterministic Lean verification, and finite receipts",
+                "frozen missing-primitive proposals with one-shot prospective gap-reduction tests",
+                "typed capability-component graphs for archive synthesis",
+                "append-only General Problem Loops with hash-chained evidence and bounded retries",
+                "compile-time candidate-to-executor binding with append-only dispatch receipts",
+                "normalized append-only evidence receipts with decision-specific eligibility",
+                "offline ARC-style prediction, counterexample, and prospective language-repair control",
+                "official ARC toolkit action mediation and hash-frozen equal-budget model comparison protocols",
             ],
             "approval_phrase": APPROVAL_PHRASE,
             "deletion_phrase": DELETION_PHRASE,
@@ -96,21 +162,141 @@ class AgentGateway:
                 "mode": "bounded_policy_improvement",
                 "promotion_phrase": PROMOTION_PHRASE,
                 "rollback_phrase": ROLLBACK_PHRASE,
-                "active_policy": self.improvements.active_policy(),
+                "active_policy": active_policy,
+                "general_candidate_registry": self.improvement_registry.status(),
             },
             "limits": {
                 "max_inline_bytes": self.config.max_inline_bytes,
                 "max_graph_vertices": self.config.max_graph_vertices,
                 "max_graph_edges": self.config.max_graph_edges,
             },
-            "knowledge": self.knowledge.status(),
+            "archive_processing": self.service.ingestor.describe(),
+            "external_experiments": self.external_experiments.status(),
+            "blind_calibration": self.blind_calibration.status(),
+            "general_problem_loop": self.general_problem_loops.status(),
+            "candidate_execution": {
+                "registry": DEFAULT_EXECUTOR_REGISTRY.status(),
+                "ledger": self.candidate_executions.status(),
+            },
+            "evidence_normalization": self.evidence_receipts.status(),
+            "knowledge": knowledge,
             "boundaries": [
                 "Surviving a configured gauntlet is not universal proof, causality, or novelty.",
                 "Plan approval is a distinct hash-bound action.",
                 "Inline agent uploads are text-only; browser/REST intake supports richer files.",
-                "Lean export checks a concrete finite witness only.",
+                "Language-limit Lean verification checks a concrete finite witness only and never upgrades it universally.",
                 "Self-improvement changes allowlisted research-policy values only and never promotes itself.",
+                "General improvement candidates can be frozen and evaluated, but cannot activate themselves.",
+                "Language transitions create inert snapshots and receipts; they never patch or activate this runtime.",
+                "The General Problem Loop records executor receipts but cannot autonomously execute external actions.",
+                "Candidate kinds are never coerced into a different executor; missing grounding fails before approval.",
+                "Evidence receipts never grant semantic admission, activation, policy promotion, or deployment authority.",
+                "The ARC-style control is a synthetic acceptance test, not an official ARC-AGI-3 score.",
+                "ARC comparison freezing never calls a model, opens task content, creates a scorecard, or claims a result.",
+                "Deterministic execution integrity is reported separately from scientific validity.",
             ],
+        }
+
+    def create_general_problem_loop(
+        self,
+        *,
+        goal: str,
+        success_criteria: list[str],
+        allowed_capabilities: list[str],
+        max_cycles: int = 3,
+        created_by: str = "user",
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.general_problem_loops.create(
+                goal=goal,
+                success_criteria=success_criteria,
+                allowed_capabilities=allowed_capabilities,
+                max_cycles=max_cycles,
+                created_by=created_by,
+            )
+
+    def general_problem_loop_status(self) -> dict[str, Any]:
+        with self._lock:
+            return self.general_problem_loops.status()
+
+    def list_general_problem_loops(self, *, limit: int = 25) -> list[dict[str, Any]]:
+        with self._lock:
+            return self.general_problem_loops.list(limit=limit)
+
+    def get_general_problem_loop(self, loop_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.general_problem_loops.get(loop_id)
+
+    def advance_general_problem_loop(
+        self,
+        loop_id: str,
+        *,
+        expected_state: str,
+        expected_previous_event_hash: str,
+        artifact: dict[str, Any],
+        actor: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.general_problem_loops.submit(
+                loop_id,
+                expected_state=expected_state,
+                expected_previous_event_hash=expected_previous_event_hash,
+                artifact=artifact,
+                actor=actor,
+            )
+
+    def verify_general_problem_loop(self, loop_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.general_problem_loops.verify_chain(loop_id)
+
+    def run_arc3_synthetic_control(self) -> dict[str, Any]:
+        """Run and persist the deterministic offline ARC-style acceptance artifact."""
+        with self._lock:
+            return run_synthetic_arc3_control(self.config.exports / "arc3_controls")
+
+    def verify_arc3_control(self, artifact: dict[str, Any]) -> dict[str, Any]:
+        """Verify self-consistency and byte identity with this tenant's stored artifact."""
+        with self._lock:
+            checked = verify_receipt_chain(artifact)
+            artifact_hash = checked["artifact_hash"]
+            stored_path = self.config.exports / "arc3_controls" / f"arc3-control-{artifact_hash}.json"
+            if not stored_path.is_file():
+                raise ValueError("ARC control artifact is not bound to this tenant's persisted control store")
+            stored_bytes = stored_path.read_bytes()
+            stored = json.loads(stored_bytes)
+            if stored != {key: value for key, value in artifact.items() if key != "artifact_path"}:
+                raise ValueError("supplied ARC control artifact differs from the tenant's persisted artifact")
+        return checked | {
+            "verification_mode": "SERVER_BOUND_PERSISTED_SYNTHETIC_ARTIFACT",
+            "server_bound": True,
+            "official_arc_execution_proved": False,
+            "stored_file_sha256": hashlib.sha256(stored_bytes).hexdigest(),
+            "build_provenance": public_build_provenance(),
+        }
+
+    def freeze_arc3_comparison_protocol(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Freeze the equal-budget GPT-5.6 baseline/hybrid comparison contract."""
+        with self._lock:
+            return freeze_comparison_protocol(spec, self.config.exports / "arc3_protocols")
+
+    def verify_arc3_comparison_protocol(self, protocol: dict[str, Any]) -> dict[str, Any]:
+        """Verify a comparison contract and require this tenant's persisted copy."""
+        with self._lock:
+            checked = verify_comparison_protocol(protocol)
+            protocol_hash = checked["protocol_hash"]
+            stored_path = self.config.exports / "arc3_protocols" / f"arc3-comparison-{protocol_hash}.json"
+            if not stored_path.is_file():
+                raise ValueError("ARC comparison protocol is not bound to this tenant's persisted protocol store")
+            stored_bytes = stored_path.read_bytes()
+            stored = json.loads(stored_bytes)
+            if stored != {key: value for key, value in protocol.items() if key != "artifact_path"}:
+                raise ValueError("supplied ARC comparison protocol differs from the tenant's persisted protocol")
+        return checked | {
+            "verification_mode": "SERVER_BOUND_PERSISTED_FROZEN_PROTOCOL",
+            "server_bound": True,
+            "official_arc_execution_proved": False,
+            "stored_file_sha256": hashlib.sha256(stored_bytes).hexdigest(),
+            "build_provenance": public_build_provenance(),
         }
 
     @staticmethod
@@ -248,7 +434,73 @@ class AgentGateway:
             raise ValueError("pass a case_id, or everything=True to clear the whole index")
         return {"scope": case_id, "messages_deleted": self.memory.delete_case(case_id)}
 
-    def ingest_upload(self, *, case_id: str, path: Path) -> dict[str, Any]:
+    def receive_upload(
+        self,
+        *,
+        case_id: str,
+        filename: str,
+        chunks: Iterator[bytes],
+        max_bytes: int,
+    ) -> dict[str, Any]:
+        """Stream an upload into object storage, then ingest it from there.
+
+        The durable copy goes to object storage first, so the archive survives even if
+        parsing fails and can be re-parsed later without asking the user to upload a
+        gigabyte again. The volume only ever sees a working copy, which is removed once
+        the parsed artifacts exist.
+
+        This is what keeps a fixed-size volume from being the limit on how many people
+        can use the service.
+        """
+        with self._lock:
+            self.service.store.get_case(case_id)
+
+        file_id = f"upl_{uuid.uuid4().hex}"
+        key = object_key(self.config.tenant, case_id, file_id, filename)
+        stored = self.objects.put_stream(key, chunks, max_bytes=max_bytes)
+        if stored.size_bytes == 0:
+            self.objects.delete(key)
+            raise ValueError("upload was empty")
+
+        staging = self.config.inbox / f"upload_{uuid.uuid4().hex}"
+        staging.mkdir(parents=True, exist_ok=True)
+        working = staging / Path(key).name
+        try:
+            with self.objects.open(key) as source, working.open("wb") as sink:
+                shutil.copyfileobj(source, sink, length=1024 * 1024)
+            record = self.ingest_upload(case_id=case_id, path=working, object_key=key)
+        except BaseException:
+            # A failed ingest must not leave an orphan in the store that nothing
+            # references and nobody is accounting for.
+            self.objects.delete(key)
+            raise
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+        self._prune_volume_original(record)
+        return record | {"object": stored.public()}
+
+    def _prune_volume_original(self, record: dict[str, Any]) -> None:
+        """Drop the volume's copy of the raw upload once a durable copy exists elsewhere.
+
+        The extracted and normalized artifacts stay, because those are what the case and
+        the search index read. The original is reachable from object storage, so keeping
+        a second copy on a fixed-size disk buys nothing and is the thing that fills it.
+        """
+        if not record.get("object_key"):
+            return
+        stored_path = record.get("stored_path")
+        if not stored_path:
+            return
+        candidate = Path(stored_path).resolve()
+        workspace = self.config.workspace.resolve()
+        if workspace in candidate.parents and candidate.is_file():
+            candidate.unlink(missing_ok=True)
+            record["volume_original_pruned"] = True
+
+    def ingest_upload(
+        self, *, case_id: str, path: Path, object_key: str | None = None
+    ) -> dict[str, Any]:
         """Ingest an already-staged file, bypassing the inline text-only size ceiling.
 
         The caller is responsible for having staged the bytes safely; this only owns
@@ -271,8 +523,11 @@ class AgentGateway:
                 "artifact_kind",
                 "profile",
                 "error",
+                "stored_path",
             )
-        } | ({"memory": memory} if memory else {})
+        } | ({"memory": memory} if memory else {}) | (
+            {"object_key": object_key} if object_key else {}
+        )
 
     def delete_case(self, case_id: str, *, confirmation: str) -> dict[str, Any]:
         """Permanently remove a case, its uploaded bytes, and its indexed memory.
@@ -337,6 +592,11 @@ class AgentGateway:
                         removed_files += 1
                 shutil.rmtree(case_directory, ignore_errors=False)
 
+            # And the durable copies in object storage, which are the point of it.
+            objects_removed = self.objects.delete_prefix(
+                f"tenants/{self.config.tenant or 'operator'}/cases/{case_id}"
+            )
+
             still_present = case_directory.exists()
             remaining_rows = connection.execute(
                 "SELECT COUNT(*) FROM research_cases WHERE id = ?", (case_id,)
@@ -356,6 +616,7 @@ class AgentGateway:
             "bytes_removed": removed_bytes,
             "file_manifest": files,
             "memory_messages_removed": memory_deleted,
+            "objects_removed": objects_removed,
             "directory_removed": str(case_directory),
             "verified_absent": not still_present and remaining_rows == 0,
             "claims_left_in_ledger": linked_claims,
@@ -437,6 +698,16 @@ class AgentGateway:
         with self._lock:
             return self.improvements.status()
 
+    def guard_claim_scope(
+        self,
+        *,
+        evidence_scope: dict[str, Any],
+        proposed_claim_scope: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Reject claims whose scope is broader than their declared evidence."""
+
+        return guard_scope_escalation(evidence_scope, proposed_claim_scope)
+
     def improvement_history(self, *, limit: int = 25) -> dict[str, Any]:
         with self._lock:
             return self.improvements.history(limit=limit)
@@ -503,11 +774,461 @@ class AgentGateway:
                 confirmation=confirmation,
             )
 
+    def governed_improvement_status(self) -> dict[str, Any]:
+        with self._lock:
+            return self.improvement_registry.status()
+
+    def record_improvement_opportunity_diagnosis(
+        self,
+        candidate_id: str,
+        *,
+        expected_candidate_hash: str,
+        metrics: dict[str, Any],
+        diagnosed_by: str,
+    ) -> dict[str, Any]:
+        """Bind one typed opportunity diagnosis to an exact inactive candidate."""
+
+        with self._lock:
+            return self.improvement_registry.record_opportunity_diagnosis(
+                candidate_id,
+                expected_candidate_hash=expected_candidate_hash,
+                metrics=metrics,
+                diagnosed_by=diagnosed_by,
+            )
+
+    def audit_observation_only_instrument(
+        self,
+        *,
+        instrument: dict[str, Any],
+        baseline_behavior: list[Any],
+        instrumented_behavior: list[Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return a deterministic, non-persistent audit receipt for supplied traces."""
+
+        return audit_observation_only_instrument(
+            instrument=instrument,
+            baseline_behavior=baseline_behavior,
+            instrumented_behavior=instrumented_behavior,
+            context=context,
+        )
+
+    def register_improvement_candidate(
+        self,
+        *,
+        candidate_kind: str,
+        limitation_kind: str,
+        base_artifact: dict[str, Any],
+        candidate_artifact: dict[str, Any],
+        problem_statement: str,
+        rationale: str,
+        expected_benefit: str,
+        observed_failure_ids: list[str] | None = None,
+        known_risks: list[str] | None = None,
+        evidence: dict[str, Any] | None = None,
+        parent_candidate_id: str | None = None,
+        created_by: str = "agent-proposal",
+    ) -> dict[str, Any]:
+        """Register an inactive candidate without changing production behavior."""
+        with self._lock:
+            return self.improvement_registry.create_candidate(
+                candidate_kind=candidate_kind,
+                limitation_kind=limitation_kind,
+                base_artifact=base_artifact,
+                candidate_artifact=candidate_artifact,
+                problem_statement=problem_statement,
+                rationale=rationale,
+                expected_benefit=expected_benefit,
+                observed_failure_ids=observed_failure_ids,
+                known_risks=known_risks,
+                evidence=evidence,
+                parent_candidate_id=parent_candidate_id,
+                created_by=created_by,
+            )
+
+    def list_governed_improvements(self, *, limit: int = 25) -> list[dict[str, Any]]:
+        with self._lock:
+            return self.improvement_registry.list_candidates(limit=limit)
+
+    def get_governed_improvement(self, candidate_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.improvement_registry.get_candidate(candidate_id)
+
+    def freeze_improvement_evaluation(
+        self,
+        candidate_id: str,
+        *,
+        evaluation_plan: dict[str, Any],
+        frozen_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.improvement_registry.freeze_evaluation(
+                candidate_id,
+                evaluation_plan=evaluation_plan,
+                frozen_by=frozen_by,
+            )
+
+    def record_governed_improvement_evaluation(
+        self,
+        candidate_id: str,
+        *,
+        expected_candidate_hash: str,
+        expected_plan_hash: str,
+        result: dict[str, Any],
+        verdict: str,
+        evaluated_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.improvement_registry.record_evaluation(
+                candidate_id,
+                expected_candidate_hash=expected_candidate_hash,
+                expected_plan_hash=expected_plan_hash,
+                result=result,
+                verdict=verdict,
+                evaluated_by=evaluated_by,
+            )
+
+    def external_experiment_status(self) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.status()
+
+    def freeze_external_experiment(
+        self,
+        *,
+        case_id: str,
+        plan_id: str,
+        expected_plan_hash: str,
+        scientific_question: str,
+        claim_scope: dict[str, Any],
+        execution_spec: dict[str, Any],
+        verdict_schema: dict[str, Any],
+        independent_verifier: dict[str, Any],
+        falsification_coverage: dict[str, Any],
+        anti_rescue_rules: list[str],
+        created_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.freeze(
+                case_id=case_id,
+                plan_id=plan_id,
+                expected_plan_hash=expected_plan_hash,
+                scientific_question=scientific_question,
+                claim_scope=claim_scope,
+                execution_spec=execution_spec,
+                verdict_schema=verdict_schema,
+                independent_verifier=independent_verifier,
+                falsification_coverage=falsification_coverage,
+                anti_rescue_rules=anti_rescue_rules,
+                created_by=created_by,
+            )
+
+    def submit_external_experiment(
+        self, experiment_id: str, *, expected_experiment_hash: str, submitted_by: str
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.submit(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                submitted_by=submitted_by,
+            )
+
+    def approve_external_experiment(
+        self,
+        experiment_id: str,
+        *,
+        expected_experiment_hash: str,
+        expected_manifest_hash: str,
+        reviewer: str,
+        rationale: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.approve(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                expected_manifest_hash=expected_manifest_hash,
+                reviewer=reviewer,
+                rationale=rationale,
+                confirmation=confirmation,
+            )
+
+    def run_external_experiment(
+        self,
+        experiment_id: str,
+        *,
+        expected_experiment_hash: str,
+        expected_manifest_hash: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.execute(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                expected_manifest_hash=expected_manifest_hash,
+            )
+
+    def record_external_verification(
+        self,
+        experiment_id: str,
+        *,
+        expected_experiment_hash: str,
+        expected_execution_receipt_hash: str,
+        verifier_receipt: dict[str, Any],
+        conclusion: str,
+        verified_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.record_verification(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                expected_execution_receipt_hash=expected_execution_receipt_hash,
+                verifier_receipt=verifier_receipt,
+                conclusion=conclusion,
+                verified_by=verified_by,
+            )
+
+    def prepare_external_reproduction(
+        self,
+        experiment_id: str,
+        *,
+        expected_experiment_hash: str,
+        expected_execution_receipt_hash: str,
+        submitted_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.prepare_reproduction(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                expected_execution_receipt_hash=expected_execution_receipt_hash,
+                submitted_by=submitted_by,
+            )
+
+    def approve_external_reproduction(
+        self,
+        experiment_id: str,
+        *,
+        expected_experiment_hash: str,
+        expected_original_receipt_hash: str,
+        expected_reproduction_manifest_hash: str,
+        reviewer: str,
+        rationale: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.approve_reproduction(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                expected_original_receipt_hash=expected_original_receipt_hash,
+                expected_reproduction_manifest_hash=expected_reproduction_manifest_hash,
+                reviewer=reviewer,
+                rationale=rationale,
+                confirmation=confirmation,
+            )
+
+    def run_external_reproduction(
+        self,
+        experiment_id: str,
+        *,
+        expected_experiment_hash: str,
+        expected_original_receipt_hash: str,
+        expected_reproduction_manifest_hash: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.execute_reproduction(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                expected_original_receipt_hash=expected_original_receipt_hash,
+                expected_reproduction_manifest_hash=expected_reproduction_manifest_hash,
+            )
+
+    def record_external_coverage_bug(
+        self,
+        experiment_id: str,
+        *,
+        expected_experiment_hash: str,
+        claim_effect: str,
+        missed_counterexample: dict[str, Any],
+        reason: str,
+        fix: dict[str, Any],
+        old_results_impacted: list[str],
+        replacement_coverage: dict[str, Any],
+        recorded_by: str,
+        affected_claim_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.record_coverage_bug(
+                experiment_id,
+                expected_experiment_hash=expected_experiment_hash,
+                claim_effect=claim_effect,
+                missed_counterexample=missed_counterexample,
+                reason=reason,
+                fix=fix,
+                old_results_impacted=old_results_impacted,
+                replacement_coverage=replacement_coverage,
+                recorded_by=recorded_by,
+                affected_claim_ids=affected_claim_ids,
+            )
+
+    def propagate_external_coverage_bug_to_claims(
+        self,
+        coverage_bug_id: str,
+        *,
+        expected_replacement_protocol_hash: str,
+    ) -> dict[str, Any]:
+        """Retry or audit the idempotent external-to-Guided claim bridge."""
+
+        with self._lock:
+            return self.external_experiments.propagate_coverage_bug_to_claims(
+                coverage_bug_id,
+                expected_replacement_protocol_hash=expected_replacement_protocol_hash,
+            )
+
+    def prepare_coverage_reevaluation(
+        self,
+        coverage_bug_id: str,
+        *,
+        expected_replacement_protocol_hash: str,
+        execution_spec: dict[str, Any],
+        resolution_targets: list[str],
+        submitted_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.prepare_coverage_reevaluation(
+                coverage_bug_id,
+                expected_replacement_protocol_hash=expected_replacement_protocol_hash,
+                execution_spec=execution_spec,
+                resolution_targets=resolution_targets,
+                submitted_by=submitted_by,
+            )
+
+    def approve_coverage_reevaluation(
+        self,
+        coverage_bug_id: str,
+        *,
+        expected_replacement_protocol_hash: str,
+        expected_reevaluation_hash: str,
+        expected_execution_manifest_hash: str,
+        reviewer: str,
+        rationale: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.approve_coverage_reevaluation(
+                coverage_bug_id,
+                expected_replacement_protocol_hash=expected_replacement_protocol_hash,
+                expected_reevaluation_hash=expected_reevaluation_hash,
+                expected_execution_manifest_hash=expected_execution_manifest_hash,
+                reviewer=reviewer,
+                rationale=rationale,
+                confirmation=confirmation,
+            )
+
+    def run_coverage_reevaluation(
+        self,
+        coverage_bug_id: str,
+        *,
+        expected_replacement_protocol_hash: str,
+        expected_reevaluation_hash: str,
+        expected_execution_manifest_hash: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.execute_coverage_reevaluation(
+                coverage_bug_id,
+                expected_replacement_protocol_hash=expected_replacement_protocol_hash,
+                expected_reevaluation_hash=expected_reevaluation_hash,
+                expected_execution_manifest_hash=expected_execution_manifest_hash,
+            )
+
+    def record_coverage_resolutions(
+        self,
+        coverage_bug_id: str,
+        *,
+        expected_reevaluation_hash: str,
+        expected_execution_receipt_hash: str,
+        resolutions: list[dict[str, Any]],
+        recorded_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.record_coverage_resolutions(
+                coverage_bug_id,
+                expected_reevaluation_hash=expected_reevaluation_hash,
+                expected_execution_receipt_hash=expected_execution_receipt_hash,
+                resolutions=resolutions,
+                recorded_by=recorded_by,
+            )
+
+    def get_coverage_bug(self, coverage_bug_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.get_coverage_bug(coverage_bug_id)
+
+    def get_external_experiment(self, experiment_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.external_experiments.get(experiment_id)
+
+    def list_external_experiments(self, *, limit: int = 25) -> list[dict[str, Any]]:
+        with self._lock:
+            return self.external_experiments.list(limit=limit)
+
     def submit_plan(self, case_id: str, *, plan: dict[str, Any], compiler: str = "external-ai") -> dict[str, Any]:
         if not compiler.strip() or len(compiler) > 120:
             raise ValueError("compiler must be a short nonblank identifier")
         with self._lock:
             return self.service.submit_external_plan(case_id, plan, compiler=compiler)
+
+    def executor_registry_status(self) -> dict[str, Any]:
+        return DEFAULT_EXECUTOR_REGISTRY.status() | {"ledger": self.candidate_executions.status()}
+
+    def list_candidate_execution_receipts(self, *, limit: int = 25) -> list[dict[str, Any]]:
+        with self._lock:
+            return self.candidate_executions.list(limit=limit)
+
+    def get_candidate_execution_receipt(self, receipt_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.candidate_executions.get(receipt_id)
+
+    def verify_candidate_execution_receipt(self, receipt_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.candidate_executions.verify(receipt_id)
+
+    def evidence_normalization_status(self) -> dict[str, Any]:
+        return self.evidence_receipts.status()
+
+    def list_normalized_evidence(self, *, limit: int = 25) -> list[dict[str, Any]]:
+        with self._lock:
+            return self.evidence_receipts.list(limit=limit)
+
+    def get_normalized_evidence(self, receipt_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.evidence_receipts.get(receipt_id)
+
+    def verify_normalized_evidence(self, receipt_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.evidence_receipts.verify(receipt_id)
+
+    def check_evidence_eligibility(self, receipt_id: str, decision_kind: str) -> dict[str, Any]:
+        with self._lock:
+            return self.evidence_receipts.check_decision(receipt_id, decision_kind)
+
+    def normalize_discovery_run_evidence(self, case_id: str, run_id: str) -> dict[str, Any]:
+        with self._lock:
+            case = self.service.store.get_case(case_id)
+            run = self.service.store.get_run(run_id)
+            if run.get("case_id") != case_id:
+                raise ValueError("discovery run does not belong to this case")
+            plan = self.service.store.get_plan(run["plan_id"])
+            return self.evidence_receipts.record(**discovery_run_receipt_input(case, run, plan))
+
+    def normalize_genome_tournament_evidence(
+        self, tournament_payload: dict[str, Any], entry_id: str
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.evidence_receipts.record(
+                **genome_tournament_receipt_input(tournament_payload, entry_id)
+            )
+
+    def normalize_external_experiment_evidence(self, experiment_id: str) -> dict[str, Any]:
+        with self._lock:
+            experiment = self.external_experiments.get(experiment_id)
+            return self.evidence_receipts.record(**external_experiment_receipt_input(experiment))
 
     def get_plan(self, plan_id: str) -> dict[str, Any]:
         with self._lock:
@@ -531,6 +1252,8 @@ class AgentGateway:
                 raise ValueError("Plan hash mismatch; fetch and review the current immutable plan again")
             if plan["status"] == "approved":
                 return plan
+            case = self.service.store.get_case(plan["case_id"])
+            DEFAULT_EXECUTOR_REGISTRY.validate_bound_plan(plan["plan"], case)
             return self.service.approve_plan(plan_id, reviewer=reviewer)
 
     def run_discovery(self, case_id: str, *, plan_id: str) -> dict[str, Any]:
@@ -540,8 +1263,175 @@ class AgentGateway:
                 raise ValueError("The plan does not belong to this case")
             if plan["status"] != "approved":
                 raise ValueError("The exact plan must be approved before execution")
-            run = self.service.run_case(case_id, plan_id=plan_id, auto_approve=False)
-            return self._run_view(run, include_findings=True)
+            plan_body = plan["plan"]
+            case = self.service.store.get_case(case_id)
+            contract = DEFAULT_EXECUTOR_REGISTRY.validate_bound_plan(plan_body, case)
+            binding = plan_body["execution_binding"]
+            try:
+                if contract.executor_id == "tabular-statistical/1":
+                    run = self.service.run_case(case_id, plan_id=plan_id, auto_approve=False)
+                    result = self._run_view(run, include_findings=True)
+                    return self._record_candidate_execution(plan, binding, "completed", result)
+                if contract.executor_id == "prospective-blind-calibration/1":
+                    candidates = plan_body.get("candidates", [])
+                    blind_policy = plan_body.get("blind_calibration", {})
+                    provider = (
+                        blind_policy.get("prediction_provider") if isinstance(blind_policy, dict) else None
+                    ) or plan_body.get("prediction_provider")
+                    for candidate in candidates:
+                        if candidate.get("kind") == PREDICTION_KIND and candidate.get("prediction_provider"):
+                            provider = candidate["prediction_provider"]
+                            break
+                    if isinstance(provider, dict) and provider.get("kind") == "external_submission":
+                        result = self.blind_calibration.prepare_from_approved_plan(case_id, plan_id)
+                    else:
+                        run = self.blind_calibration.execute_from_approved_plan(case_id, plan_id)
+                        result = self._run_view(run, include_findings=False)
+                    return self._record_candidate_execution(plan, binding, "prepared", result)
+                if contract.executor_id == "structured-research-operator/1":
+                    candidate = next(
+                        item for item in plan_body["candidates"]
+                        if item.get("kind") in {"research_operator", "external_experiment"}
+                    )
+                    execution = candidate["execution_contract"]
+                    experiment = self.external_experiments.freeze(
+                        case_id=case_id,
+                        plan_id=plan_id,
+                        expected_plan_hash=plan["plan_hash"],
+                        scientific_question=execution["scientific_question"],
+                        claim_scope=execution["claim_scope"],
+                        execution_spec=execution["execution_spec"],
+                        verdict_schema=execution["verdict_schema"],
+                        independent_verifier=execution["independent_verifier"],
+                        falsification_coverage=execution["falsification_coverage"],
+                        anti_rescue_rules=execution["anti_rescue_rules"],
+                        created_by=str(execution.get("created_by") or "unified-candidate-dispatch"),
+                    )
+                    result = {
+                        "status": "frozen_external_experiment",
+                        "candidate_id": candidate["id"],
+                        "experiment": experiment,
+                        "next_required_action": "submit the frozen experiment, then separately approve its exact execution manifest",
+                        "scientific_claim_committed": False,
+                    }
+                    return self._record_candidate_execution(plan, binding, "prepared", result)
+                raise RuntimeError(f"registered executor {contract.executor_id!r} has no dispatcher implementation")
+            except Exception as exc:
+                self.candidate_executions.record(
+                    case_id=case_id,
+                    plan_id=plan_id,
+                    plan_hash=plan["plan_hash"],
+                    binding=binding,
+                    outcome="failed",
+                    result_reference={"error_type": type(exc).__name__, "error": str(exc)},
+                )
+                raise
+
+    def _record_candidate_execution(
+        self,
+        plan: dict[str, Any],
+        binding: dict[str, Any],
+        outcome: str,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        reference = {
+            "payload_hash": candidate_result_hash(result),
+            "result_id": result.get("id") or result.get("protocol_id") or result.get("experiment", {}).get("id"),
+            "status": result.get("status"),
+        }
+        receipt = self.candidate_executions.record(
+            case_id=plan["case_id"],
+            plan_id=plan["id"],
+            plan_hash=plan["plan_hash"],
+            binding=binding,
+            outcome=outcome,
+            result_reference=reference,
+        )
+        return result | {"execution_dispatch": receipt}
+
+    def blind_calibration_status(self) -> dict[str, Any]:
+        with self._lock:
+            return self.blind_calibration.status()
+
+    def get_blind_calibration(self, protocol_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.blind_calibration.get(protocol_id)
+
+    def get_blind_prediction_batch(self, protocol_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self.blind_calibration.prediction_batch(protocol_id)
+
+    def freeze_blind_predictions(
+        self,
+        protocol_id: str,
+        *,
+        expected_protocol_hash: str,
+        predictions: list[dict[str, Any]],
+        provider: dict[str, Any],
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.blind_calibration.freeze_predictions(
+                protocol_id,
+                expected_protocol_hash=expected_protocol_hash,
+                predictions=predictions,
+                provider=provider,
+            )
+
+    def seal_blind_scoring_key(
+        self,
+        protocol_id: str,
+        *,
+        expected_protocol_hash: str,
+        expected_prediction_freeze_hash: str,
+        filename: str,
+        content: str,
+        sealed_by: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.blind_calibration.seal_scoring_key(
+                protocol_id,
+                expected_protocol_hash=expected_protocol_hash,
+                expected_prediction_freeze_hash=expected_prediction_freeze_hash,
+                filename=filename,
+                content=content,
+                sealed_by=sealed_by,
+            )
+
+    def approve_blind_reveal(
+        self,
+        protocol_id: str,
+        *,
+        expected_protocol_hash: str,
+        expected_prediction_freeze_hash: str,
+        expected_scoring_key_hash: str,
+        reviewer: str,
+        rationale: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.blind_calibration.approve_reveal(
+                protocol_id,
+                expected_protocol_hash=expected_protocol_hash,
+                expected_prediction_freeze_hash=expected_prediction_freeze_hash,
+                expected_scoring_key_hash=expected_scoring_key_hash,
+                reviewer=reviewer,
+                rationale=rationale,
+                confirmation=confirmation,
+            )
+
+    def score_blind_calibration(
+        self,
+        protocol_id: str,
+        *,
+        expected_prediction_freeze_hash: str,
+        expected_scoring_key_hash: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.blind_calibration.score(
+                protocol_id,
+                expected_prediction_freeze_hash=expected_prediction_freeze_hash,
+                expected_scoring_key_hash=expected_scoring_key_hash,
+            )
 
     @staticmethod
     def _run_view(run: dict[str, Any], *, include_findings: bool, offset: int = 0, limit: int = 50) -> dict[str, Any]:
@@ -564,6 +1454,16 @@ class AgentGateway:
                 "reports",
                 "error_type",
                 "error",
+                "protocol_id",
+                "protocol_hash",
+                "plan_hash",
+                "constraint_count",
+                "prediction_count",
+                "freeze_status",
+                "prediction_freeze_hash",
+                "freeze_receipt",
+                "scoring_accessed",
+                "scored",
             )
             if key in result
         }
@@ -587,6 +1487,64 @@ class AgentGateway:
         with self._lock:
             self.service.store.get_case(case_id)
             return self.service.store.case_claims(case_id)
+
+    def discover_and_freeze_language_limit(
+        self,
+        *,
+        case_id: str,
+        snapshot_spec: dict[str, Any],
+        cases: list[dict[str, Any]],
+        provenance_hashes: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.language_limits.discover_and_freeze(
+                case_id=case_id,
+                snapshot_spec=snapshot_spec,
+                cases=cases,
+                provenance_hashes=provenance_hashes,
+            )
+
+    def verify_language_limit(
+        self,
+        *,
+        certificate_hash: str,
+        certificate: dict[str, Any] | None = None,
+        provenance_hashes: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.language_limits.verify(
+                certificate_hash=certificate_hash,
+                certificate=certificate,
+                provenance_hashes=provenance_hashes,
+            )
+
+    def get_language_limit(self, certificate_hash: str) -> dict[str, Any]:
+        with self._lock:
+            return self.language_limits.get(certificate_hash)
+
+    def list_case_language_limits(self, case_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            return self.language_limits.list_for_case(case_id)
+
+    def propose_language_refinement(
+        self, *, case_id: str, snapshot_spec: dict[str, Any], discovery_cases: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.language_limits.propose_refinement(
+                case_id=case_id, snapshot_spec=snapshot_spec, discovery_cases=discovery_cases
+            )
+
+    def evaluate_language_refinement(
+        self, *, proposal_hash: str, evaluation_cases: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self.language_limits.evaluate_refinement(
+                proposal_hash=proposal_hash, evaluation_cases=evaluation_cases
+            )
+
+    def get_language_refinement(self, proposal_hash: str) -> dict[str, Any]:
+        with self._lock:
+            return self.language_limits.get_refinement(proposal_hash)
 
     def claim_history(self, claim_id: str) -> dict[str, Any]:
         with self._lock:

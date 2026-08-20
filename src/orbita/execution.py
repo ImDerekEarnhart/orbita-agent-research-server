@@ -9,7 +9,7 @@ import subprocess
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -31,7 +31,7 @@ _DEFAULT_STDIO_LIMIT = 1024 * 1024
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _stable_json(value: Any) -> str:
@@ -107,7 +107,7 @@ class ResourceLimits:
             raise ValueError("stderr_bytes must be between 1 KiB and 16 MiB")
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any] | None) -> "ResourceLimits":
+    def from_dict(cls, value: dict[str, Any] | None) -> ResourceLimits:
         return cls(**dict(value or {}))
 
 
@@ -126,7 +126,7 @@ class StagedFile:
             raise ValueError("Inline staged file exceeds the 2 MiB limit")
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "StagedFile":
+    def from_dict(cls, value: dict[str, Any]) -> StagedFile:
         return cls(
             target=str(value["target"]),
             source=value.get("source"),
@@ -154,7 +154,7 @@ class OutputObligation:
             Draft202012Validator.check_schema(self.json_schema)
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "OutputObligation":
+    def from_dict(cls, value: dict[str, Any]) -> OutputObligation:
         return cls(
             path=str(value["path"]),
             required=bool(value.get("required", True)),
@@ -193,7 +193,7 @@ class ExecutionClaimTest:
             )
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "ExecutionClaimTest":
+    def from_dict(cls, value: dict[str, Any]) -> ExecutionClaimTest:
         return cls(
             claim_id=str(value["claim_id"]),
             output_path=str(value["output_path"]),
@@ -265,7 +265,7 @@ class ContainerExecutionSpec:
                 raise ValueError(f"Invalid environment value for {key}")
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any], *, base_dir: str | Path | None = None) -> "ContainerExecutionSpec":
+    def from_dict(cls, value: dict[str, Any], *, base_dir: str | Path | None = None) -> ContainerExecutionSpec:
         base = Path(base_dir).resolve() if base_dir is not None else None
 
         def staged(items: list[dict[str, Any]]) -> tuple[StagedFile, ...]:
@@ -469,7 +469,7 @@ class CliOCIEngine:
 class ContainerExecutionRuntime:
     """Manifest-bound OCI execution with human approval and durable receipts."""
 
-    def __init__(self, ledger: "EpistemicLedger", workspace: str | Path | None = None):
+    def __init__(self, ledger: EpistemicLedger, workspace: str | Path | None = None):
         self.ledger = ledger
         self.workspace = (
             Path(workspace).expanduser().resolve()

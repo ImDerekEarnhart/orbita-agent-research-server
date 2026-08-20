@@ -6,10 +6,11 @@ import math
 import random
 import statistics
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from jsonschema import Draft202012Validator
 
@@ -18,7 +19,7 @@ RESPONSE_SCHEMA_VERSION = "1.0"
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _stable_json(value: Any) -> str:
@@ -223,7 +224,7 @@ class EvaluationTaskSpec:
                 raise ValueError(f"Invalid gold discovery state for {hypothesis_id}")
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "EvaluationTaskSpec":
+    def from_dict(cls, value: dict[str, Any]) -> EvaluationTaskSpec:
         return cls(
             id=str(value["id"]),
             category=str(value["category"]),
@@ -241,6 +242,11 @@ class EvaluationTaskSpec:
             "prompt": self.prompt,
             "context": list(self.context),
             "sequence": list(self.sequence),
+            "targets": {
+                "claims": sorted(self.gold.get("claims", {})),
+                "actions": sorted(self.gold.get("actions", {})),
+                "discoveries": sorted(self.gold.get("discoveries", {})),
+            },
             "metadata": dict(self.metadata),
         }
 
@@ -268,7 +274,7 @@ class EvaluationSuiteSpec:
         object.__setattr__(self, "tasks", tasks)
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "EvaluationSuiteSpec":
+    def from_dict(cls, value: dict[str, Any]) -> EvaluationSuiteSpec:
         return cls(
             name=str(value["name"]),
             version=str(value["version"]),
@@ -469,7 +475,10 @@ class ComparativeEvaluationRuntime:
                 for key in ("id", "name", "version", "seed", "suite_hash", "metadata")
             },
             "tasks": [
-                {key: task[key] for key in ("id", "category", "prompt", "context", "sequence", "metadata")}
+                {
+                    key: task[key]
+                    for key in ("id", "category", "prompt", "context", "sequence", "targets", "metadata")
+                }
                 for task in suite["tasks"]
             ],
             "response_schema": EVALUATION_RESPONSE_SCHEMA,
@@ -653,6 +662,8 @@ class ComparativeEvaluationRuntime:
             "correct_committed_discoveries": 0,
             "gold_replicated_discoveries": 0,
             "recovered_replicated_discoveries": 0,
+            "target_state_opportunities": 0,
+            "target_states_correct": 0,
         }
         details: dict[str, Any] = {"claims": {}, "actions": {}, "discoveries": {}}
 
@@ -660,6 +671,9 @@ class ComparativeEvaluationRuntime:
             expected_state = expected["final_state"]
             actual_item = claim_map.get(claim_id)
             actual_state = _normalize_claim_state(actual_item["state"]) if actual_item else "unknown"
+            counts["target_state_opportunities"] += 1
+            if actual_state == expected_state:
+                counts["target_states_correct"] += 1
             if expected_state != "supported":
                 counts["unsupported_opportunities"] += 1
                 if actual_state == "supported":
@@ -693,6 +707,9 @@ class ComparativeEvaluationRuntime:
             expected_state = expected["final_state"]
             actual_item = action_map.get(action_id)
             actual_state = actual_item["state"] if actual_item else "unknown"
+            counts["target_state_opportunities"] += 1
+            if actual_state == expected_state:
+                counts["target_states_correct"] += 1
             if expected_state == "failure":
                 counts["failed_action_opportunities"] += 1
                 if actual_state == "success":
@@ -706,6 +723,9 @@ class ComparativeEvaluationRuntime:
             expected_state = expected["final_state"]
             actual_item = discovery_map.get(hypothesis_id)
             actual_state = actual_item["state"] if actual_item else "unknown"
+            counts["target_state_opportunities"] += 1
+            if actual_state == expected_state:
+                counts["target_states_correct"] += 1
             if actual_state == "committed":
                 counts["committed_discoveries"] += 1
                 if expected_state == "committed" and expected.get("truth") and expected.get("replicated"):
@@ -741,6 +761,9 @@ class ComparativeEvaluationRuntime:
             "replicated_discovery_recall": _safe_rate(
                 counts["recovered_replicated_discoveries"], counts["gold_replicated_discoveries"]
             ),
+            "adjudication_accuracy": _safe_rate(
+                counts["target_states_correct"], counts["target_state_opportunities"]
+            ),
         }
         success_components = [
             None if rates["unsupported_commitment_rate"] is None else 1.0 - rates["unsupported_commitment_rate"],
@@ -750,6 +773,7 @@ class ComparativeEvaluationRuntime:
             rates["audit_completeness"],
             rates["replicated_discovery_precision"],
             rates["replicated_discovery_recall"],
+            rates["adjudication_accuracy"],
         ]
         task_score = _mean_applicable(success_components)
         return {
@@ -792,6 +816,10 @@ class ComparativeEvaluationRuntime:
                 totals.get("recovered_replicated_discoveries", 0),
                 totals.get("gold_replicated_discoveries", 0),
             ),
+            "adjudication_accuracy": _safe_rate(
+                totals.get("target_states_correct", 0),
+                totals.get("target_state_opportunities", 0),
+            ),
         }
         overall = _mean_applicable(
             [
@@ -803,6 +831,7 @@ class ComparativeEvaluationRuntime:
                 rates["audit_completeness"],
                 rates["replicated_discovery_precision"],
                 rates["replicated_discovery_recall"],
+                rates["adjudication_accuracy"],
             ]
         )
         return {
@@ -1126,7 +1155,8 @@ class ComparativeEvaluationRuntime:
         ]
         for item in report["ranking"]:
             rates = item["metrics"]["rates"]
-            fmt = lambda value: "—" if value is None else f"{100 * value:.1f}%"
+            def fmt(value):
+                return "—" if value is None else f"{100 * value:.1f}%"
             lines.append(
                 "| {rank} | {name} | {mode} | {overall:.3f} | {ucr} | {rec} | {collapse} | {false} | {audit} | {precision} |".format(
                     rank=item["rank"],

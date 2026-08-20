@@ -12,7 +12,16 @@ from urllib.request import Request, urlopen
 
 OPERATOR_FREEZE_PHRASE = "I reviewed this exact discovery operator"
 TOURNAMENT_FREEZE_PHRASE = "I reviewed this exact blind tournament"
+TOURNAMENT_REVEAL_PHRASE = "I reviewed this exact tournament reveal"
 RESULT_RECORD_PHRASE = "I reviewed this exact tournament result"
+SAFE_GENOME_ERROR_CODES = frozenset(
+    {
+        "invalid_prediction",
+        "duplicate_operator_entry",
+        "attachment_target_not_found",
+        "attachment_conflict",
+    }
+)
 
 
 class DiscoveryGenomeError(RuntimeError):
@@ -39,6 +48,19 @@ def tournament_result_receipt(
         "entry_id": entry_id,
         "verdict": verdict,
         "result": result,
+    }
+
+
+def tournament_reveal_receipt(
+    tournament_id: str,
+    manifest_hash: str,
+    reveal: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema": "orbita.discovery-tournament-reveal.v1",
+        "tournament_id": tournament_id,
+        "manifest_hash": manifest_hash,
+        "reveal": reveal,
     }
 
 
@@ -124,8 +146,21 @@ class DiscoveryGenomeClient:
                 raw = response.read().decode("utf-8")
                 return json.loads(raw) if raw else {}
         except HTTPError as exc:
-            exc.close()
-            raise DiscoveryGenomeError(f"Discovery Genome service request failed with HTTP {exc.code}") from exc
+            safe_code = ""
+            try:
+                raw_error = exc.read(8_192).decode("utf-8")
+                error_body = json.loads(raw_error) if raw_error else {}
+                candidate = str(error_body.get("code") or "") if isinstance(error_body, dict) else ""
+                if candidate in SAFE_GENOME_ERROR_CODES:
+                    safe_code = candidate
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                pass
+            finally:
+                exc.close()
+            suffix = f" ({safe_code})" if safe_code else ""
+            raise DiscoveryGenomeError(
+                f"Discovery Genome service request failed with HTTP {exc.code}{suffix}"
+            ) from exc
         except OSError as exc:
             raise DiscoveryGenomeError("Discovery Genome service is unavailable") from exc
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -137,8 +172,33 @@ class DiscoveryGenomeClient:
             return {"configured": False, "missing": missing}
         return {"configured": True, **self._request("GET", "/status")}
 
+    def core_tenant_id(self) -> str:
+        """Resolve this Guided username to its opaque shared-core tenant boundary."""
+        value = str(self._request("GET", "/status").get("core_tenant_id") or "")
+        if len(value) != 34 or not value.startswith("g-"):
+            raise DiscoveryGenomeError("Discovery Genome service did not return a core tenant identity")
+        digest = value[2:]
+        if any(character not in "0123456789abcdef" for character in digest):
+            raise DiscoveryGenomeError("Discovery Genome service returned an invalid core tenant identity")
+        return value
+
     def list_operators(self) -> dict[str, Any]:
         return self._request("GET", "/operators")
+
+    def list_graphs(self) -> dict[str, Any]:
+        return self._request("GET", "/graphs")
+
+    def programme_state(self, graph_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/graphs/{quote(graph_id, safe='')}/programme-state")
+
+    def compile_programme_state(self, graph_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/graphs/{quote(graph_id, safe='')}/programme-state/compile", {})
+
+    def list_questions(self, graph_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/graphs/{quote(graph_id, safe='')}/questions")
+
+    def generate_questions(self, graph_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/graphs/{quote(graph_id, safe='')}/questions/generate", {})
 
     def seed_operators(self) -> dict[str, Any]:
         return self._request("POST", "/operators/seed", {})
@@ -213,6 +273,44 @@ class DiscoveryGenomeClient:
         if not hmac.compare_digest(frozen_hash, expected_review_hash):
             raise DiscoveryGenomeError("Frozen tournament hash does not match the reviewed hash")
         return result
+
+    def mark_tournament_revealed(
+        self,
+        tournament_id: str,
+        *,
+        expected_manifest_hash: str,
+        reveal: dict[str, Any],
+        confirmation: str,
+        expected_reveal_hash: str | None = None,
+    ) -> dict[str, Any]:
+        if confirmation != TOURNAMENT_REVEAL_PHRASE:
+            raise DiscoveryGenomeError(f"confirmation must exactly equal: {TOURNAMENT_REVEAL_PHRASE}")
+        current = self.get_tournament(tournament_id).get("tournament", {})
+        manifest_hash = str(current.get("manifest_hash") or "")
+        if not manifest_hash or not hmac.compare_digest(manifest_hash, expected_manifest_hash):
+            raise DiscoveryGenomeError("Discovery tournament manifest hash mismatch")
+        reviewed_receipt = tournament_reveal_receipt(tournament_id, expected_manifest_hash, reveal)
+        actual = hash_json(reviewed_receipt)
+        if expected_reveal_hash and not hmac.compare_digest(actual, expected_reveal_hash):
+            raise DiscoveryGenomeError("Tournament reveal hash mismatch")
+        response = self._request(
+            "POST",
+            f"/tournaments/{quote(tournament_id, safe='')}/reveal",
+            {
+                "expected_manifest_hash": expected_manifest_hash,
+                "reveal": reveal,
+                "expected_reveal_hash": expected_reveal_hash or actual,
+            },
+        )
+        tournament = response.get("tournament", {})
+        if (
+            str(tournament.get("id") or "") != tournament_id
+            or not hmac.compare_digest(str(tournament.get("manifest_hash") or ""), expected_manifest_hash)
+            or not hmac.compare_digest(str(tournament.get("reveal_hash") or ""), actual)
+            or not tournament.get("revealed_at")
+        ):
+            raise DiscoveryGenomeError("Persisted tournament reveal does not match the reviewed operation")
+        return {**response, "reveal_hash": actual}
 
     def record_tournament_result(
         self,

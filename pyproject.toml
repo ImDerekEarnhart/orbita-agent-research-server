@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbita-agent-research-server"
-version = "0.4.0"
+version = "0.10.0"
 description = "MCP-native governed discovery with approval-gated policy improvement and a tenant-scoped Discovery Genome."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -32,6 +32,8 @@ dependencies = [
   "openpyxl>=3.1,<4",
   "pypdf>=5,<7",
   "python-docx>=1.1,<2",
+  # S3-compatible client, used for Cloudflare R2 archive storage.
+  "boto3>=1.34,<2",
 ]
 
 [project.optional-dependencies]
@@ -57,7 +59,13 @@ include = ["orbita*", "orbita_discovery*", "orbita_mvp*", "orbita_agent*"]
 [tool.setuptools.package-data]
 orbita = ["schemas/*.json", "ui_assets/*.html", "ui_assets/*.js", "ui_assets/*.css"]
 orbita_mvp = ["static/*.html"]
-orbita_agent = ["resources/*.sqlite", "resources/lean/*", "resources/lean/ErdosGyarfas/*.lean"]
+orbita_agent = [
+  "resources/*.sqlite",
+  "resources/lean/*",
+  "resources/lean/ErdosGyarfas/*.lean",
+  "resources/language_limit_kernel/*",
+  "resources/language_limit_kernel/OrbitaLanguageLimit/*.lean",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -68,3 +76,18 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+ignore = [
+  # Long lines are widespread in frozen schemas, SQL, and research strings;
+  # formatting them mechanically would make audit diffs harder to review.
+  "E501",
+  # FastAPI's File(...) dependency declaration intentionally uses this form.
+  "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# These recursive DFS functions are created and consumed within each loop
+# iteration; they are never retained after the loop variable changes.
+"src/orbita_agent/eg_lemma_miner.py" = ["B023"]
+# This test intentionally verifies that an invalid inherited workspace cannot
+# be opened, regardless of the lower-level exception implementation.
+"tests/test_workspace_tenancy.py" = ["B017"]

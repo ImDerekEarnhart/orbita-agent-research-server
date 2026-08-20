@@ -14,7 +14,6 @@ from orbita import EvidenceKind, Stance
 
 from .service import ResearchMVP
 
-
 DB_PATH = Path(os.getenv("ORBITA_MVP_DB", "orbita_mvp.db"))
 WORKSPACE = Path(os.getenv("ORBITA_MVP_WORKSPACE", "orbita_workspace"))
 service = ResearchMVP(DB_PATH, WORKSPACE)

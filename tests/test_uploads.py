@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 import zipfile
 
 import pytest
@@ -156,6 +155,17 @@ def test_expired_tickets_can_be_purged(store):
 
 @pytest.fixture
 def server(gateway, monkeypatch):
+    # Route tests exercise ticketing, ownership, parsing, and archive policy—not
+    # the host machine's current free-space state. Keep them deterministic while
+    # the dedicated volume-headroom tests above continue to cover the fail-closed
+    # production guard with explicit low- and high-space fixtures.
+    import collections
+
+    usage = collections.namedtuple("usage", "total used free")
+    monkeypatch.setattr(
+        "orbita_agent.uploads.shutil.disk_usage",
+        lambda path: usage(total=10_000_000_000, used=1_000_000_000, free=9_000_000_000),
+    )
     monkeypatch.setenv("ORBITA_AGENT_REQUIRE_AUTH", "1")
     monkeypatch.setenv("ORBITA_AGENT_AUTH_MODE", "oauth-github")
     monkeypatch.setenv("ORBITA_OAUTH_GITHUB_CLIENT_ID", "github-client")
