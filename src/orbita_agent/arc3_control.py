@@ -80,6 +80,9 @@ def verify_receipt_chain(artifact: dict[str, Any]) -> dict[str, Any]:
         "receipt_count": len(chain),
         "latest_receipt_hash": previous,
         "artifact_hash": artifact["artifact_hash"],
+        "verification_mode": "SELF_CONSISTENCY_ONLY",
+        "authentic_server_execution_proved": False,
+        "official_arc_execution_proved": False,
     }
 
 
@@ -123,6 +126,12 @@ class _LineWorld:
         return True
 
 
+class _NoLanguageHoleWorld(_LineWorld):
+    """Negative control: every level supports the same visible action rule."""
+
+    starts = ((0, 1), (0, 1), (0, 1))
+
+
 def _snapshot() -> dict[str, Any]:
     return build_language_snapshot(
         {
@@ -155,10 +164,21 @@ def _predict(action: str, relation: str | None, refined: bool) -> int:
     return int(action == "RIGHT")
 
 
-def run_synthetic_arc3_control(output_dir: str | Path | None = None) -> dict[str, Any]:
+def run_synthetic_arc3_control(
+    output_dir: str | Path | None = None,
+    *,
+    control_variant: str = "hidden-direction",
+) -> dict[str, Any]:
     """Run the frozen three-level control and return one replayable artifact."""
 
-    world = _LineWorld()
+    variants = {
+        "hidden-direction": (_LineWorld, "synthetic-hidden-direction-line-world/1"),
+        "no-language-hole": (_NoLanguageHoleWorld, "synthetic-no-language-hole-negative-control/1"),
+    }
+    if control_variant not in variants:
+        raise ValueError("unsupported synthetic ARC control variant")
+    world_type, environment_id = variants[control_variant]
+    world = world_type()
     snapshot = _snapshot()
     receipts: list[dict[str, Any]] = []
     discovery_cases: list[dict[str, Any]] = []
@@ -263,10 +283,45 @@ def run_synthetic_arc3_control(output_dir: str | Path | None = None) -> dict[str
             if not world.next_level():
                 break
 
-    if audit is None or proposal is None or evaluation is None:
-        raise RuntimeError("synthetic ARC control did not reach its required language-repair stages")
-    if evaluation["strict_improvement"] is not True:
-        raise RuntimeError("frozen representation repair failed its prospective control")
+    refusal_reasons = []
+    if audit is None or audit.get("verdict") != "LANGUAGE_LIMIT_WITNESS":
+        refusal_reasons.append("no finite language-limit witness was established")
+    if proposal is None:
+        refusal_reasons.append("no missing primitive was admissible")
+    if evaluation is None:
+        refusal_reasons.append("no prospective refinement evaluation was completed")
+    elif evaluation.get("strict_improvement") is not True:
+        refusal_reasons.append("the frozen refinement did not strictly reduce the finite gap")
+
+    if refusal_reasons:
+        summary = {
+            "status": "CONTROL_REFUSED",
+            "levels_completed": len(world_type.starts),
+            "actions_taken": actions_taken,
+            "failed_hypotheses": failed_hypotheses,
+            "counterexample_count": sum(item["kind"] == "counterexample_retained" for item in receipts),
+            "prediction_count": sum(item["kind"] == "prediction_frozen" for item in receipts),
+            "language_limit_detected": audit is not None and audit.get("verdict") == "LANGUAGE_LIMIT_WITNESS",
+            "proposed_primitive": proposal["primitive"]["source_field"] if proposal else None,
+            "prospective_refinement_survived": bool(evaluation and evaluation.get("strict_improvement") is True),
+            "refusal_reasons": refusal_reasons,
+            "score_accessed": False,
+            "llm_prose_used_as_proof": False,
+            "scope": "offline_synthetic_negative_control_only",
+        }
+        append_receipt(receipts, "control_refused", summary)
+        body = {
+            "schema": SCHEMA,
+            "receipt_schema": RECEIPT_SCHEMA,
+            "environment": environment_id,
+            "snapshot": snapshot,
+            "representation_audit": audit,
+            "refinement_proposal": proposal,
+            "refinement_evaluation": evaluation,
+            "summary": summary,
+            "receipts": receipts,
+        }
+        return _finalize_artifact(body, output_dir)
 
     summary = {
         "levels_completed": len(_LineWorld.starts),
@@ -285,7 +340,7 @@ def run_synthetic_arc3_control(output_dir: str | Path | None = None) -> dict[str
     body = {
         "schema": SCHEMA,
         "receipt_schema": RECEIPT_SCHEMA,
-        "environment": "synthetic-hidden-direction-line-world/1",
+        "environment": environment_id,
         "snapshot": snapshot,
         "representation_audit": audit,
         "refinement_proposal": proposal,
@@ -293,6 +348,10 @@ def run_synthetic_arc3_control(output_dir: str | Path | None = None) -> dict[str
         "summary": summary,
         "receipts": receipts,
     }
+    return _finalize_artifact(body, output_dir)
+
+
+def _finalize_artifact(body: dict[str, Any], output_dir: str | Path | None) -> dict[str, Any]:
     artifact = body | {"artifact_hash": content_hash(body)}
     verify_receipt_chain(artifact)
     if output_dir is not None:

@@ -408,12 +408,15 @@ def build_mcp_server(
 
     @mcp.custom_route("/health", methods=["GET"], include_in_schema=False)
     async def health(_request: Request) -> JSONResponse:
+        from .build_provenance import public_build_provenance
+
         return JSONResponse(
             {
                 "status": "ok",
                 "product": "orbita-agent-research-server",
                 "version": __version__,
                 "authentication": remote_auth.label,
+                "build_provenance": public_build_provenance(),
             }
         )
 
@@ -1105,7 +1108,11 @@ def build_mcp_server(
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_verify_arc3_control(artifact: dict[str, Any]) -> dict[str, Any]:
-        """Recompute every receipt link and the top-level hash of an ARC control artifact."""
+        """Verify hashes and require an exact tenant-stored synthetic control artifact.
+
+        This proves server-bound persistence and self-consistency only. It does not
+        prove execution against an official ARC environment.
+        """
         return _gateway_for_caller().verify_arc3_control(artifact)
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)
@@ -1119,7 +1126,10 @@ def build_mcp_server(
 
     @mcp.tool(annotations=READ_ONLY, structured_output=True)
     def orbita_verify_arc3_comparison_protocol(protocol: dict[str, Any]) -> dict[str, Any]:
-        """Verify the protocol hash and equal-budget condition invariant without writes."""
+        """Verify equal budgets and require the caller's exact persisted frozen protocol.
+
+        This proves server-bound protocol identity, not benchmark execution or score.
+        """
         return _gateway_for_caller().verify_arc3_comparison_protocol(protocol)
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=True)

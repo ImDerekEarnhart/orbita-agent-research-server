@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import shutil
 import threading
@@ -19,6 +21,7 @@ from .arc3_control import run_synthetic_arc3_control, verify_receipt_chain
 from .arc3_official import freeze_comparison_protocol, verify_comparison_protocol
 from .archive_policy import ArchivePolicy
 from .blind_calibration import PREDICTION_KIND, BlindCalibrationService
+from .build_provenance import public_build_provenance
 from .candidate_execution import CandidateExecutionLedger
 from .candidate_execution import content_hash as candidate_result_hash
 from .config import AgentConfig
@@ -133,6 +136,7 @@ class AgentGateway:
                 "discovery_engine": "0.2-compatible",
                 "research_mvp": "0.1-derived",
             },
+            "build_provenance": public_build_provenance(),
             "research_routes": [
                 "tabular intake and deterministic profiling",
                 "frozen scout/confirmation plans",
@@ -250,20 +254,50 @@ class AgentGateway:
         with self._lock:
             return run_synthetic_arc3_control(self.config.exports / "arc3_controls")
 
-    @staticmethod
-    def verify_arc3_control(artifact: dict[str, Any]) -> dict[str, Any]:
-        """Verify a supplied ARC control artifact without changing tenant state."""
-        return verify_receipt_chain(artifact)
+    def verify_arc3_control(self, artifact: dict[str, Any]) -> dict[str, Any]:
+        """Verify self-consistency and byte identity with this tenant's stored artifact."""
+        with self._lock:
+            checked = verify_receipt_chain(artifact)
+            artifact_hash = checked["artifact_hash"]
+            stored_path = self.config.exports / "arc3_controls" / f"arc3-control-{artifact_hash}.json"
+            if not stored_path.is_file():
+                raise ValueError("ARC control artifact is not bound to this tenant's persisted control store")
+            stored_bytes = stored_path.read_bytes()
+            stored = json.loads(stored_bytes)
+            if stored != {key: value for key, value in artifact.items() if key != "artifact_path"}:
+                raise ValueError("supplied ARC control artifact differs from the tenant's persisted artifact")
+        return checked | {
+            "verification_mode": "SERVER_BOUND_PERSISTED_SYNTHETIC_ARTIFACT",
+            "server_bound": True,
+            "official_arc_execution_proved": False,
+            "stored_file_sha256": hashlib.sha256(stored_bytes).hexdigest(),
+            "build_provenance": public_build_provenance(),
+        }
 
     def freeze_arc3_comparison_protocol(self, spec: dict[str, Any]) -> dict[str, Any]:
         """Freeze the equal-budget GPT-5.6 baseline/hybrid comparison contract."""
         with self._lock:
             return freeze_comparison_protocol(spec, self.config.exports / "arc3_protocols")
 
-    @staticmethod
-    def verify_arc3_comparison_protocol(protocol: dict[str, Any]) -> dict[str, Any]:
-        """Verify a comparison contract without executing either condition."""
-        return verify_comparison_protocol(protocol)
+    def verify_arc3_comparison_protocol(self, protocol: dict[str, Any]) -> dict[str, Any]:
+        """Verify a comparison contract and require this tenant's persisted copy."""
+        with self._lock:
+            checked = verify_comparison_protocol(protocol)
+            protocol_hash = checked["protocol_hash"]
+            stored_path = self.config.exports / "arc3_protocols" / f"arc3-comparison-{protocol_hash}.json"
+            if not stored_path.is_file():
+                raise ValueError("ARC comparison protocol is not bound to this tenant's persisted protocol store")
+            stored_bytes = stored_path.read_bytes()
+            stored = json.loads(stored_bytes)
+            if stored != {key: value for key, value in protocol.items() if key != "artifact_path"}:
+                raise ValueError("supplied ARC comparison protocol differs from the tenant's persisted protocol")
+        return checked | {
+            "verification_mode": "SERVER_BOUND_PERSISTED_FROZEN_PROTOCOL",
+            "server_bound": True,
+            "official_arc_execution_proved": False,
+            "stored_file_sha256": hashlib.sha256(stored_bytes).hexdigest(),
+            "build_provenance": public_build_provenance(),
+        }
 
     @staticmethod
     def _case_view(case: dict[str, Any]) -> dict[str, Any]:

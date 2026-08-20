@@ -123,3 +123,18 @@ def test_committed_registration_rebuilds_to_the_frozen_hash() -> None:
     )
     assert build_comparison_protocol(spec) == expected
     assert verify_comparison_protocol(expected)["valid"] is True
+
+
+def test_gateway_requires_persisted_protocol(gateway) -> None:
+    protocol = build_comparison_protocol(_spec())
+
+    with pytest.raises(ValueError, match="not bound to this tenant"):
+        gateway.verify_arc3_comparison_protocol(protocol)
+
+    persisted = gateway.freeze_arc3_comparison_protocol(_spec())
+    verification = gateway.verify_arc3_comparison_protocol(persisted)
+
+    assert verification["valid"] is True
+    assert verification["server_bound"] is True
+    assert verification["verification_mode"] == "SERVER_BOUND_PERSISTED_FROZEN_PROTOCOL"
+    assert verification["official_arc_execution_proved"] is False

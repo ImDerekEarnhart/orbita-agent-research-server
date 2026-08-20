@@ -59,4 +59,33 @@ def test_gateway_persists_control_idempotently(gateway):
 
     assert first["artifact_hash"] == second["artifact_hash"]
     assert first["artifact_path"] == second["artifact_path"]
-    assert gateway.verify_arc3_control(first)["valid"] is True
+    verification = gateway.verify_arc3_control(first)
+    assert verification["valid"] is True
+    assert verification["server_bound"] is True
+    assert verification["verification_mode"] == "SERVER_BOUND_PERSISTED_SYNTHETIC_ARTIFACT"
+    assert verification["official_arc_execution_proved"] is False
+
+
+def test_gateway_rejects_self_consistent_but_unpersisted_artifact(gateway):
+    artifact = run_synthetic_arc3_control(control_variant="no-language-hole")
+
+    assert verify_receipt_chain(artifact)["valid"] is True
+    with pytest.raises(ValueError, match="not bound to this tenant"):
+        gateway.verify_arc3_control(artifact)
+
+
+def test_negative_control_preserves_refusal_artifact(tmp_path):
+    artifact = run_synthetic_arc3_control(tmp_path, control_variant="no-language-hole")
+
+    assert artifact["summary"]["status"] == "CONTROL_REFUSED"
+    assert artifact["summary"]["language_limit_detected"] is False
+    assert artifact["summary"]["prospective_refinement_survived"] is False
+    assert artifact["summary"]["refusal_reasons"]
+    assert artifact["receipts"][-1]["kind"] == "control_refused"
+    assert verify_receipt_chain(artifact)["valid"] is True
+    assert artifact["artifact_path"]
+
+
+def test_unknown_control_variant_fails_closed():
+    with pytest.raises(ValueError, match="unsupported synthetic ARC control variant"):
+        run_synthetic_arc3_control(control_variant="made-up")
